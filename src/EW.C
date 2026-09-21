@@ -3542,14 +3542,14 @@ void EW::get_exact_point_source( float_sw4* up, float_sw4 t, int g, Source& sour
 complex<float_sw4> asin(complex<float_sw4> z)
 {
   complex<float_sw4> I(0,1);
-  return -I*log(I*z + sqrt(1. - pow(z,2)));
+  return -I*log(I*z + sqrt(static_cast<float_sw4>(1.) - z*z));
 }
- 
+
 //-----------------------------------------------------------------------
 complex<float_sw4> atan(complex<float_sw4> z)
 {
   complex<float_sw4> I(0,1);
-  return I/2.*log((I + z)/(I - z));
+  return I/static_cast<float_sw4>(2.)*log((I + z)/(I - z));
 }
  
 //-----------------------------------------------------------------------

@@ -511,7 +511,7 @@ void RandomizedMaterial::get_fourier_modes( complex<float_sw4>* uhat, int n1, in
    
    default_random_engine generator(seed);
    //   normal_distribution<float_sw4> ndist(0.0,1.0);
-   uniform_real_distribution<double> udist(0.0,2*M_PI);
+   uniform_real_distribution<float_sw4> udist(0.0,2*M_PI);
 
    int r1=(n1g-1)/2, r2=(n2-1)/2, r3=(n3-1)/2;
    float_sw4 tpi=2*M_PI;

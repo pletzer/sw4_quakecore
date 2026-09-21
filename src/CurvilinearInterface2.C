@@ -12,7 +12,7 @@ extern "C" {
    void F77_FUNC(dgetrs,DGETRS)(char*, int*, int*, double*, int*, int*, double*, int*, int*);
 }
 
-void bndryOpNoGhostc( double *acof_no_gp, double *ghcof_no_gp, double *sbop_no_gp );
+void bndryOpNoGhostc( float_sw4 *acof_no_gp, float_sw4 *ghcof_no_gp, float_sw4 *sbop_no_gp );
 
 void curvilinear4sgwind( int, int, int, int, int, int, int, int, float_sw4*, float_sw4*, float_sw4*,
                          float_sw4*, float_sw4*, float_sw4*, int*, float_sw4*, float_sw4*, float_sw4*, float_sw4*,
@@ -261,9 +261,12 @@ void CurvilinearInterface2::init_arrays( vector<float_sw4*>& a_strx,
    m_ipiv_block = new int[3*msize];
    int lwork=9;
    double* work=new double[lwork];
+   double block[9];
    for( size_t ind=0 ; ind < msize; ind++ )
    {
-      F77_FUNC(dgetrf,DGETRF)(&three, &three, &m_mass_block[9*ind], &three,
+      for( int c=0 ; c < 9 ; c++ )
+	 block[c] = m_mass_block[9*ind+c];
+      F77_FUNC(dgetrf,DGETRF)(&three, &three, block, &three,
 			      &m_ipiv_block[3*ind], &info );
       if( info != 0)
       {
@@ -272,12 +275,12 @@ void CurvilinearInterface2::init_arrays( vector<float_sw4*>& a_strx,
          std::cerr << "LU Fails at (i,j) equals" << i << "," << j
                    << " info = " << info << " " << m_Mass_block(info+3*(info-1), i, j,1)
                       << "\n";
-         for (int l = 1; l <= 3; l++) 
+         for (int l = 1; l <= 3; l++)
             for (int m = 1; m <= 3; m++)
 	      std::cerr << m_Mass_block(m +3*(l-1), i, j,1) << ",";
 	    std::cerr << "\n";
       }
-      F77_FUNC(dgetri,DGETRI)(&three, &m_mass_block[9*ind], &three,
+      F77_FUNC(dgetri,DGETRI)(&three, block, &three,
 			      &m_ipiv_block[3*ind], work, &lwork, &info );
       if( info != 0)
       {
@@ -286,11 +289,13 @@ void CurvilinearInterface2::init_arrays( vector<float_sw4*>& a_strx,
          std::cerr << "DGETRI Fails at (i,j) equals" << i << "," << j
                    << " info = " << info << " " << m_Mass_block(info+3*(info-1), i, j,1)
                       << "\n";
-         for (int l = 1; l <= 3; l++) 
+         for (int l = 1; l <= 3; l++)
             for (int m = 1; m <= 3; m++)
 	      std::cerr << m_Mass_block(m +3*(l-1), i, j,1) << ",";
 	    std::cerr << "\n";
       }
+      for( int c=0 ; c < 9 ; c++ )
+	 m_mass_block[9*ind+c] = block[c];
    }
    delete[] work;
 }

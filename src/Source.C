@@ -3131,10 +3131,10 @@ void Source::get_mr_psources( EW* a_EW, int g, float_sw4 q, float_sw4 r,
    if( gradient )
       nrhs = 4;
 
-   float_sw4* a_ = new float_sw4[ncond*125];
+   double* a_ = new double[ncond*125];
    int ldb = ncond > 125? ncond:125;
-   float_sw4* b_ = new float_sw4[ldb*nrhs];
-   //   float_sw4* x_ = new float_sw4[125];   
+   double* b_ = new double[ldb*nrhs];
+   //   float_sw4* x_ = new float_sw4[125];
 
    //   std::cout << "SOURCE at interface, g= " << g << " (ic,jc,kc)= " << ic <<
    //      ", " << jc << ", " << kc << std::endl;
@@ -3290,7 +3290,7 @@ void Source::get_mr_psources( EW* a_EW, int g, float_sw4 q, float_sw4 r,
          Sarray zfa(icf-7,icf+7,jcf-7,jcf+7,Nzf-5,Nzf);
          Sarray Jfa(icf-7,icf+7,jcf-7,jcf+7,Nzf-5,Nzf);
          a_EW->m_gridGenerator->generate_z_and_j( a_EW, gf, zfa, Jfa );
-         float_sw4* _mom_f=new double[15*15*ncond];
+         double* _mom_f=new double[15*15*ncond];
 #define mom_f(c,i,j) _mom_f[(c-1)+ncond*(i-icf+7)+15*ncond*(j-jcf+7)]
          for( int j=jcf-7 ; j<= jcf+7 ; j++ )
             for( int i=icf-7 ; i<= icf+7 ; i++ )
@@ -3542,7 +3542,7 @@ void Source::get_mr_psources( EW* a_EW, int g, float_sw4 q, float_sw4 r,
    char tr='N';
    int ssize=125, one=1, info=0, nb=20;
    int lwork=ncond+ncond*nb;
-   float_sw4* work = new float_sw4[lwork];
+   double* work = new double[lwork];
    F77_FUNC(dgels,DGELS)( tr, ncond, ssize, nrhs, a_, ncond, b_, ldb, 
                           work, lwork, info );
    delete[] work;
@@ -3800,9 +3800,9 @@ void Source::get_cc_psources( EW* a_EW, int g, float_sw4 q, float_sw4 r,
       if( gradient )
          nrhs = 4;
 
-      float_sw4* a_ = new float_sw4[ncond*125];
+      double* a_ = new double[ncond*125];
       int ldb = ncond > 125? ncond:125;
-      float_sw4* b_ = new float_sw4[ldb*nrhs];
+      double* b_ = new double[ldb*nrhs];
    //   float_sw4* x_ = new float_sw4[125];   
 
    //   std::cout << "SOURCE at interface, g= " << g << " (ic,jc,kc)= " << ic <<
@@ -4102,7 +4102,7 @@ void Source::get_cc_psources( EW* a_EW, int g, float_sw4 q, float_sw4 r,
    char tr='N';
    int ssize=125, one=1, info=0, nb=20;
    int lwork=ncond+ncond*nb;
-   float_sw4* work = new float_sw4[lwork];
+   double* work = new double[lwork];
    F77_FUNC(dgels,DGELS)( tr, ncond, ssize, nrhs, a_, ncond, b_, ldb, 
                           work, lwork, info );
    delete[] work;
