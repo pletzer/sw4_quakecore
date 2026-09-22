@@ -26,12 +26,13 @@ if(NOT CMAKE_CXX_COMPILER AND NOT DEFINED ENV{CXX})
     set(CMAKE_CXX_COMPILER "${SW4_MPICXX_EXECUTABLE}")
   endif()
 endif()
-if(NOT CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
-  find_program(SW4_MPIFORT_EXECUTABLE NAMES mpifort mpif90)
-  if(SW4_MPIFORT_EXECUTABLE)
-    set(CMAKE_Fortran_COMPILER "${SW4_MPIFORT_EXECUTABLE}")
-  endif()
-endif()
+# There does not appear be any fortran code calling MPI so turning off
+#if(NOT CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
+#  find_program(SW4_MPIFORT_EXECUTABLE NAMES mpifort mpif90)
+#  if(SW4_MPIFORT_EXECUTABLE)
+#    set(CMAKE_Fortran_COMPILER "${SW4_MPIFORT_EXECUTABLE}")
+#  endif()
+#endif()
 
 project(SW4 C CXX Fortran)
 
@@ -65,7 +66,7 @@ site_name(HOSTNAME)
 set(USERNAME $ENV{USER})
 today(CURDATETIME)
 
-find_package(MPI REQUIRED)
+find_package(MPI REQUIRED COMPONENTS C CXX)
 
 if(NOT PROJ_OSGEO4W_HOME)
   set(PROJ_OSGEO4W_HOME ${PROJ_HOME})
