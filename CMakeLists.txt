@@ -1,4 +1,38 @@
 cmake_minimum_required(VERSION 3.16)
+
+# Prefer the MPI compiler wrappers as the project's compilers, unless the user
+# already picked one explicitly (via -DCMAKE_<LANG>_COMPILER=... or the CC/CXX/FC
+# environment variables). This must happen before project(), since a language's
+# compiler can only be chosen before it is first detected.
+#
+# Why: find_package(MPI) below still works with a plain (non-wrapper) compiler,
+# but then has to derive the right MPI include/library flags itself, usually by
+# scraping the output of `mpicc -show` and friends. That heuristic is fragile
+# across MPI implementations/versions -- e.g. on mahuika with OpenMPI 5.0.10 +
+# GCC 15.2.0, it fails outright ("Could NOT find MPI_C (missing: MPI_C_WORKS)")
+# even though mpicc/mpicxx/mpifort are on PATH and work fine invoked directly.
+# Using the wrapper as CMAKE_<LANG>_COMPILER sidesteps that derivation entirely:
+# the wrapper already knows its own flags, and FindMPI recognizes an MPI-aware
+# compiler immediately.
+if(NOT CMAKE_C_COMPILER AND NOT DEFINED ENV{CC})
+  find_program(SW4_MPICC_EXECUTABLE NAMES mpicc)
+  if(SW4_MPICC_EXECUTABLE)
+    set(CMAKE_C_COMPILER "${SW4_MPICC_EXECUTABLE}")
+  endif()
+endif()
+if(NOT CMAKE_CXX_COMPILER AND NOT DEFINED ENV{CXX})
+  find_program(SW4_MPICXX_EXECUTABLE NAMES mpicxx mpic++)
+  if(SW4_MPICXX_EXECUTABLE)
+    set(CMAKE_CXX_COMPILER "${SW4_MPICXX_EXECUTABLE}")
+  endif()
+endif()
+if(NOT CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
+  find_program(SW4_MPIFORT_EXECUTABLE NAMES mpifort mpif90)
+  if(SW4_MPIFORT_EXECUTABLE)
+    set(CMAKE_Fortran_COMPILER "${SW4_MPIFORT_EXECUTABLE}")
+  endif()
+endif()
+
 project(SW4 C CXX Fortran)
 
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/configs/")
