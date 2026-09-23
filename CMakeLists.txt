@@ -279,9 +279,11 @@ endif()
 
 set(TESTING_LEVEL 0 CACHE STRING "Level of testing thoroughness: 0=short tests (<1 minute each), 2=all tests (may take an hour)")
 set(MPI_NUM_TEST_PROCS 4 CACHE STRING "Number of MPI processes to use in tests")
+set(OMP_NUM_TEST_THREADS 2 CACHE STRING "OpenMP threads per MPI rank in tests")
 
 set(PYTEST_DIR ${CMAKE_SOURCE_DIR}/pytest)
 set(REF_DIR ${CMAKE_SOURCE_DIR}/pytest/reference)
+math(EXPR TEST_NUM_CPUS "${MPI_NUM_TEST_PROCS} * ${OMP_NUM_TEST_THREADS}")
 
 set(TEST_DIRS       twilight               twilight         twilight
                     twilight               twilight         twilight
@@ -396,6 +398,13 @@ foreach(TEST_IND RANGE ${NUM_TESTS})
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
         COMMAND ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} ${MPI_NUM_TEST_PROCS} ${MPIEXEC_PREFLAGS} ${MPIEXEC_POSTFLAGS}
             ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/sw4 ${REF_DIR}/${TEST_DIR}/${TEST_IN_FILE}
+    )
+    # Pin the thread count so an unset OMP_NUM_THREADS doesn't spawn one
+    # thread per core in every rank (badly oversubscribes shared nodes).
+    set_tests_properties(
+        Run_${Test_Name}
+        PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=${OMP_NUM_TEST_THREADS}"
+                   PROCESSORS ${TEST_NUM_CPUS}
     )
 
     set(TEST_REF_FILE ${REF_DIR}/${TEST_DIR}/${RESULT_SUBDIR}/${TEST_BASE_FILE}.txt)
