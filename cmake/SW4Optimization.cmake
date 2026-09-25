@@ -156,6 +156,18 @@ elseif(SW4_RESOLVED_TARGET STREQUAL "cascade" OR
   set(_intel_arch "-march=core-avx2")   # icpx -x targets are Intel-only
   set(_zmm ON)
   set(_target_note "Zen 4, AVX-512 on a 256-bit datapath, 12 mem ch/socket")
+  # znver4 arrived in GCC 13 / LLVM 16 (AOCC 4.0 has it). Older compilers, e.g.
+  # GCC 11.3 in gimkl/2022a, reject it outright; give them Zen 3 tuning plus the
+  # AVX-512 subsets Zen 4 implements, which is what -march=znver4 adds for FP code.
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-march=znver4" SW4_HAVE_MARCH_ZNVER4)
+    if(NOT SW4_HAVE_MARCH_ZNVER4)
+      set(_gnu_arch "-march=znver3" "-mtune=znver3"
+          "-mavx512f" "-mavx512cd" "-mavx512bw" "-mavx512dq" "-mavx512vl")
+      set(_target_note "${_target_note}; compiler lacks znver4, using znver3 + AVX-512")
+    endif()
+  endif()
 
 elseif(SW4_RESOLVED_TARGET STREQUAL "hpc3-milan")
   # REANNZ HPC3 milan partition: 2x EPYC 7713, 128 c/node. Zen 3: AVX2 ONLY.
@@ -273,7 +285,8 @@ endif()
 # SW4_ARCH_FLAGS stays an honoured manual override: if the user set it, we do
 # not second-guess them.
 if(SW4_ARCH_FLAGS STREQUAL "")
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM" AND _intel_arch)
+  # "Intel" is classic icpc (intel/2022a), which takes the same -x/-march spellings
+  if(CMAKE_CXX_COMPILER_ID MATCHES "^Intel" AND _intel_arch)
     set(SW4_RESOLVED_ARCH_FLAGS ${_intel_arch})
   else()
     set(SW4_RESOLVED_ARCH_FLAGS ${_gnu_arch})
