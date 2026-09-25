@@ -58,12 +58,17 @@ def main():
     precs = list(dict.fromkeys(q for _, q in times))
     width = 0.8 / len(precs)
 
+    # centre each platform's bars on its tick, however many precisions it has
+    xpos = {}
+    for i, p in enumerate(platforms):
+        present = [q for q in precs if (p, q) in times]
+        for j, q in enumerate(present):
+            xpos[(p, q)] = i + (j - (len(present) - 1) / 2) * width
+
     fig, ax = plt.subplots(figsize=(1.8 * len(platforms) + 2, 4.5))
-    for j, prec in enumerate(precs):
-        xs = [i + (j - (len(precs) - 1) / 2) * width
-              for i, p in enumerate(platforms) if (p, prec) in times]
-        ys = [times[(p, prec)] for p in platforms if (p, prec) in times]
-        bars = ax.bar(xs, ys, width, label=prec)
+    for prec in precs:
+        keys = [(p, prec) for p in platforms if (p, prec) in times]
+        bars = ax.bar([xpos[k] for k in keys], [times[k] for k in keys], width, label=prec)
         ax.bar_label(bars, fmt="%.1f", padding=2, fontsize=9)
 
     ax.set_xticks(range(len(platforms)), platforms)

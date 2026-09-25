@@ -20,9 +20,15 @@
 #     sbatch tools/run_testcase.sl meshrefine/refine-el-2
 #     sbatch tools/run_testcase.sl curvimeshrefine/gausshill-att-3
 #
-# Each run gets its own directory <name>-runs/<platform>-<precision>/. The summary is
+# Each run gets its own directory <name>-runs/<jobid>/<platform>-<precision>/. The summary is
 # written to <name>-<jobid>.md and <name>-<jobid>.csv, and a bar plot of the execution
 # times to <name>-<jobid>.png (see tools/plot_testcase_timings.py).
+#
+# By default every build-{gimkl,intel,aocc}-{default,single} is run. Set SW4_BUILDS to a
+# list of build directory suffixes to run others; everything before the last "-" is
+# reported as the platform, the rest as the precision:
+#
+#     SW4_BUILDS="gimkl-default gimkl-genoa-default" sbatch tools/run_testcase.sl ...
 
 testcase=${1:-meshrefine/refine-el-2}
 name=$(basename "$testcase")
@@ -30,14 +36,18 @@ name=$(basename "$testcase")
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-1}
 export OMP_PROC_BIND=close
 export OMP_PLACES=cores
-# Intel MPI (gimkl, intel): give each rank OMP_NUM_THREADS cores
+# Intel MPI (gimkl, intel): give each rank OMP_NUM_THREADS cores. Without
+# I_MPI_PIN_CELL=core the domain is OMP_NUM_THREADS hardware threads, i.e. both
+# threads of a rank share one core when SMT is on.
 export I_MPI_PIN_DOMAIN=omp
+export I_MPI_PIN_CELL=core
 
 root=${SW4_ROOT:-$SLURM_SUBMIT_DIR}
 infile="$root/pytest/reference/${testcase}.in"
 reffile="$root/pytest/reference/${testcase}/TwilightErr.txt"
-rundir="$root/${name}-runs"
 jobid=${SLURM_JOB_ID:-local}
+# per job, so that jobs running at the same time do not wipe each other's runs
+rundir="$root/${name}-runs/${jobid}"
 tablefile="$root/${name}-${jobid}.md"
 csvfile="$root/${name}-${jobid}.csv"
 plotfile="$root/${name}-${jobid}.png"
@@ -45,8 +55,7 @@ ntasks=${SLURM_NTASKS:-4}
 # python with matplotlib, for the bar plot
 python_module=Python/3.11.3-gimkl-2022a
 
-platforms="gimkl intel aocc"
-precs="default single"
+builds=${SW4_BUILDS:-"gimkl-default gimkl-single intel-default intel-single aocc-default aocc-single"}
 
 if [ ! -f "$infile" ]; then
     echo "input file $infile not found; submit from the sw4 source tree or set SW4_ROOT"
@@ -82,53 +91,68 @@ solver_seconds() {
 
 mkdir -p "$rundir"
 echo "test case: $testcase, node: $(hostname), ranks: $ntasks, threads/rank: $OMP_NUM_THREADS"
+echo "pinning: OMP_PROC_BIND=$OMP_PROC_BIND OMP_PLACES=$OMP_PLACES I_MPI_PIN_DOMAIN=$I_MPI_PIN_DOMAIN I_MPI_PIN_CELL=$I_MPI_PIN_CELL SW4_LAUNCH=${SW4_LAUNCH:-mpirun}"
 
 rows=()
 echo "platform,precision,disp_errinf,disp_errl2,att_errinf,att_errl2,step_seconds,wall_seconds,status" > "$csvfile"
-for platform in $platforms; do
-    for prec in $precs; do
-        combo="${platform}-${prec}"
-        builddir="$root/build-${combo}"
-        sw4="$builddir/bin/sw4"
-        if [ ! -x "$sw4" ]; then
-            echo "skipping ${combo}: $sw4 not found"
-            rows+=("| $platform | $prec | - | - | - | - | - | - | missing |")
-            echo "$platform,$prec,,,,,,,missing" >> "$csvfile"
-            continue
-        fi
-        workdir="$rundir/$combo"
-        rm -rf "$workdir"
-        mkdir -p "$workdir"
-        logfile="$workdir/sw4.out"
+for combo in $builds; do
+    platform=${combo%-*}
+    prec=${combo##*-}
+    builddir="$root/build-${combo}"
+    sw4="$builddir/bin/sw4"
+    if [ ! -x "$sw4" ]; then
+        echo "skipping ${combo}: $sw4 not found"
+        rows+=("| $platform | $prec | - | - | - | - | - | - | missing |")
+        echo "$platform,$prec,,,,,,,missing" >> "$csvfile"
+        continue
+    fi
+    workdir="$rundir/$combo"
+    rm -rf "$workdir"
+    mkdir -p "$workdir"
+    logfile="$workdir/sw4.out"
 
-        echo "=========== running ${combo} ==========="
-        status=ok
-        # subshell: the module environment doesn't leak into the next build
-        (
-            cd "$workdir"
-            source "$builddir/sourceme.sh" > /dev/null 2>&1
-            if mpirun --version 2>&1 | grep -q "Open MPI"; then
-                launch="mpirun -np $ntasks --map-by slot:PE=$OMP_NUM_THREADS --bind-to core"
+    echo "=========== running ${combo} ==========="
+    status=ok
+    # subshell: the module environment doesn't leak into the next build
+    (
+        cd "$workdir"
+        source "$builddir/sourceme.sh" > /dev/null 2>&1
+        # SW4_LAUNCH (from the environment or a build's sourceme.sh) overrides mpirun.
+        # SW4_LAUNCH=srun lets Slurm place every rank the same way whatever the MPI --
+        # also the workaround for Open MPI 4.1.5, whose mpirun binds outside the
+        # Slurm allocation. Any other value is used as the launch command verbatim.
+        if [ "$SW4_LAUNCH" = srun ]; then
+            if mpirun --version 2>&1 | grep -q "Open MPI) 5"; then
+                launch="srun --mpi=pmix --cpu-bind=cores"    # Open MPI 5 dropped PMI2
+            elif mpirun --version 2>&1 | grep -q "Open MPI"; then
+                launch="srun --mpi=pmi2 --cpu-bind=cores"
             else
-                launch="mpirun -np $ntasks"
+                export I_MPI_PMI_LIBRARY=/usr/lib64/libpmi2.so
+                launch="srun --mpi=pmi2 --cpu-bind=cores"
             fi
-            echo "$launch $sw4 $infile"
-            start=$(date +%s.%N)
-            rc=0
-            $launch "$sw4" "$infile" > "$logfile" 2>&1 || rc=$?
-            end=$(date +%s.%N)
-            awk -v a="$start" -v b="$end" 'BEGIN { printf "%.2f\n", b - a }' > wall.txt
-            exit $rc
-        ) || status=failed
+        elif [ -n "$SW4_LAUNCH" ]; then
+            launch="$SW4_LAUNCH"
+        elif mpirun --version 2>&1 | grep -q "Open MPI"; then
+            launch="mpirun -np $ntasks --map-by slot:PE=$OMP_NUM_THREADS --bind-to core"
+        else
+            launch="mpirun -np $ntasks"
+        fi
+        echo "$launch $sw4 $infile"
+        start=$(date +%s.%N)
+        rc=0
+        $launch "$sw4" "$infile" > "$logfile" 2>&1 || rc=$?
+        end=$(date +%s.%N)
+        awk -v a="$start" -v b="$end" 'BEGIN { printf "%.2f\n", b - a }' > wall.txt
+        exit $rc
+    ) || status=failed
 
-        wall=$(cat "$workdir/wall.txt" 2>/dev/null || echo -)
-        solver=$(solver_seconds "$logfile")
-        read -r dinf dl2 ainf al2 <<< "$(read_errors "$workdir/$outpath/TwilightErr.txt")"
-        rows+=("| $platform | $prec | $dinf | $dl2 | $ainf | $al2 | ${solver:--} | $wall | $status |")
-        echo "$platform,$prec,$dinf,$dl2,$ainf,$al2,$solver,$wall,$status" | sed 's/,-/,/g' >> "$csvfile"
-        echo "${combo}: disp errInf=$dinf errL2=$dl2, att errInf=$ainf errL2=$al2," \
-             "time stepping=${solver:--}s wall=${wall}s ($status)"
-    done
+    wall=$(cat "$workdir/wall.txt" 2>/dev/null || echo -)
+    solver=$(solver_seconds "$logfile")
+    read -r dinf dl2 ainf al2 <<< "$(read_errors "$workdir/$outpath/TwilightErr.txt")"
+    rows+=("| $platform | $prec | $dinf | $dl2 | $ainf | $al2 | ${solver:--} | $wall | $status |")
+    echo "$platform,$prec,$dinf,$dl2,$ainf,$al2,$solver,$wall,$status" | sed 's/,-/,/g' >> "$csvfile"
+    echo "${combo}: disp errInf=$dinf errL2=$dl2, att errInf=$ainf errL2=$al2," \
+         "time stepping=${solver:--}s wall=${wall}s ($status)"
 done
 
 read -r rdinf rdl2 rainf ral2 <<< "$(read_errors "$reffile")"
