@@ -123,7 +123,7 @@ endif()
 # 2. Per-target architecture flags
 # ---------------------------------------------------------------------------
 # _gnu_arch  : GCC / Clang -march-family flags
-# _intel_arch: Intel oneAPI (icpx) -x-family flags
+# _intel_arch: Intel icpx / classic icpc flags (-x-family, or -march on AMD)
 # _zmm       : ON if 512-bit vectors are a win on this part.
 #
 # On Skylake-SP and Cascade Lake, 512-bit ops trigger license-based frequency
@@ -153,7 +153,10 @@ elseif(SW4_RESOLVED_TARGET STREQUAL "cascade" OR
   # per-core vector throughput of SPR, but 12 memory channels per socket
   # instead of 8, which suits a bandwidth-bound stencil.
   set(_gnu_arch "-march=znver4" "-mtune=znver4")
-  set(_intel_arch "-march=core-avx2")   # icpx -x targets are Intel-only
+  # -x targets are Intel-only: -xCORE-AVX512 aborts on AMD and -ax falls back
+  # to the baseline path. -march emits the ISA without the CPU check. Zen 4
+  # implements every AVX-512 subset icelake-server uses.
+  set(_intel_arch "-march=icelake-server")
   set(_zmm ON)
   set(_target_note "Zen 4, AVX-512 on a 256-bit datapath, 12 mem ch/socket")
   # znver4 arrived in GCC 13 / LLVM 16 (AOCC 4.0 has it). Older compilers, e.g.
@@ -236,6 +239,21 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     list(APPEND _cxx_opt -qopt-report=3)
   endif()
   set(_fort_opt -fp-model=precise)
+
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
+  # Classic icpc (intel/2022a). Same size limit as icpx: without
+  # -qoverride-limits it skipped 4 of the 5 loops in curvilinear4sg_ci_impl
+  # ("optimizations were skipped to constrain compile time"), which made the
+  # AVX-512 build 1.76x slower than AVX2 on genoa (gausshill-att-3, single).
+  # With it, AVX-512 is ~6% faster than AVX2. -qopt-zmm-usage=high is needed
+  # too, or icpc keeps loops at 256 bits even with AVX-512 enabled.
+  list(APPEND _cxx_opt -qoverride-limits)
+  if(_zmm)
+    list(APPEND _cxx_opt -qopt-zmm-usage=high)
+  endif()
+  if(SW4_OPT_REPORT)
+    list(APPEND _cxx_opt -qopt-report=3)
+  endif()
 
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   list(APPEND _cxx_opt
@@ -372,7 +390,7 @@ set(SW4_UNROLL_HEAVY_SOURCES
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set(SW4_UNROLL_HEAVY_FLAGS --param=max-completely-peeled-insns=4000)
 else()
-  set(SW4_UNROLL_HEAVY_FLAGS "")   # icpx already gets -qoverride-limits
+  set(SW4_UNROLL_HEAVY_FLAGS "")   # icpx and icpc already get -qoverride-limits
 endif()
 
 if(SW4_UNROLL_HEAVY_FLAGS AND CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo")
