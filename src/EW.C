@@ -3883,7 +3883,7 @@ void EW::get_exact_point_source(float_sw4 *up, float_sw4 t, int g,
 //-----------------------------------------------------------------------
 complex<float_sw4> asin(complex<float_sw4> z) {
   complex<float_sw4> I(0, 1);
-  return -I * log(I * z + sqrt(float_sw4(1) - pow(z, 2)));
+  return -I * log(I * z + sqrt(float_sw4(1) - z * z));
 }
 
 //-----------------------------------------------------------------------
