@@ -1008,13 +1008,22 @@ void Sarray::assign( const float* ar, int corder )
    }
    else if( m_corder )
    {
-      // Class array in corder, input array in fortran order, 
-#pragma omp parallel for
-      for( int i=0 ; i <m_ni ; i++ )
+      // Class array in corder, input array in fortran order.
+      // (k,j) are split over the threads as in set_to_zero (the first touch) and i is
+      // innermost, so the writes are contiguous and the reads have stride m_nc. The old
+      // i-outer order had strides of whole planes in the inner loops, and with AVX-512
+      // icpc turned it into gathers: at 305^3 x 3 per rank (lamb-3) it took 0.5-1.0 s per
+      // call against 0.03 s now (tools/bench_sarray_assign).
+      const size_t offc = ((size_t) m_ni)*m_nj*m_nk;
+#pragma omp parallel for collapse(2)
+      for( int k=0 ; k <m_nk ; k++ )
 	 for( int j=0 ; j <m_nj ; j++ )
-	    for( int k=0 ; k <m_nk ; k++ )
-	       for( int c=0 ; c < m_nc ; c++ )
-		  m_data[i+m_ni*j+m_ni*m_nj*k+m_ni*m_nj*m_nk*c] = ar[c+m_nc*i+m_nc*m_ni*j+m_nc*m_ni*m_nj*k];
+	 {
+	    const size_t line = ((size_t) m_ni)*j + ((size_t) m_ni)*m_nj*k;
+	    for( int c=0 ; c < m_nc ; c++ )
+	       for( int i=0 ; i <m_ni ; i++ )
+		  m_data[line+offc*c+i] = ar[c+m_nc*(line+i)];
+	 }
    }
    else
    {
@@ -1040,13 +1049,22 @@ void Sarray::assign( const double* ar, int corder )
    }
    else if( m_corder )
    {
-      // Class array in corder, input array in fortran order, 
-#pragma omp parallel for
-      for( int i=0 ; i <m_ni ; i++ )
+      // Class array in corder, input array in fortran order.
+      // (k,j) are split over the threads as in set_to_zero (the first touch) and i is
+      // innermost, so the writes are contiguous and the reads have stride m_nc. The old
+      // i-outer order had strides of whole planes in the inner loops, and with AVX-512
+      // icpc turned it into gathers: at 305^3 x 3 per rank (lamb-3) it took 0.5-1.0 s per
+      // call against 0.03 s now (tools/bench_sarray_assign).
+      const size_t offc = ((size_t) m_ni)*m_nj*m_nk;
+#pragma omp parallel for collapse(2)
+      for( int k=0 ; k <m_nk ; k++ )
 	 for( int j=0 ; j <m_nj ; j++ )
-	    for( int k=0 ; k <m_nk ; k++ )
-	       for( int c=0 ; c < m_nc ; c++ )
-		  m_data[i+m_ni*j+m_ni*m_nj*k+m_ni*m_nj*m_nk*c] = ar[c+m_nc*i+m_nc*m_ni*j+m_nc*m_ni*m_nj*k];
+	 {
+	    const size_t line = ((size_t) m_ni)*j + ((size_t) m_ni)*m_nj*k;
+	    for( int c=0 ; c < m_nc ; c++ )
+	       for( int i=0 ; i <m_ni ; i++ )
+		  m_data[line+offc*c+i] = ar[c+m_nc*(line+i)];
+	 }
    }
    else
    {
