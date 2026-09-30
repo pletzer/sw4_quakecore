@@ -1,4 +1,39 @@
 cmake_minimum_required(VERSION 3.16)
+
+# Prefer the MPI compiler wrappers as the project's compilers, unless the user
+# already picked one explicitly (via -DCMAKE_<LANG>_COMPILER=... or the CC/CXX/FC
+# environment variables). This must happen before project(), since a language's
+# compiler can only be chosen before it is first detected.
+#
+# Why: find_package(MPI) below still works with a plain (non-wrapper) compiler,
+# but then has to derive the right MPI include/library flags itself, usually by
+# scraping the output of `mpicc -show` and friends. That heuristic is fragile
+# across MPI implementations/versions -- e.g. on mahuika with OpenMPI 5.0.10 +
+# GCC 15.2.0, it fails outright ("Could NOT find MPI_C (missing: MPI_C_WORKS)")
+# even though mpicc/mpicxx/mpifort are on PATH and work fine invoked directly.
+# Using the wrapper as CMAKE_<LANG>_COMPILER sidesteps that derivation entirely:
+# the wrapper already knows its own flags, and FindMPI recognizes an MPI-aware
+# compiler immediately.
+if(NOT CMAKE_C_COMPILER AND NOT DEFINED ENV{CC})
+  find_program(SW4_MPICC_EXECUTABLE NAMES mpicc)
+  if(SW4_MPICC_EXECUTABLE)
+    set(CMAKE_C_COMPILER "${SW4_MPICC_EXECUTABLE}")
+  endif()
+endif()
+if(NOT CMAKE_CXX_COMPILER AND NOT DEFINED ENV{CXX})
+  find_program(SW4_MPICXX_EXECUTABLE NAMES mpicxx mpic++)
+  if(SW4_MPICXX_EXECUTABLE)
+    set(CMAKE_CXX_COMPILER "${SW4_MPICXX_EXECUTABLE}")
+  endif()
+endif()
+# There does not appear be any fortran code calling MPI so turning off
+#if(NOT CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
+#  find_program(SW4_MPIFORT_EXECUTABLE NAMES mpifort mpif90)
+#  if(SW4_MPIFORT_EXECUTABLE)
+#    set(CMAKE_Fortran_COMPILER "${SW4_MPIFORT_EXECUTABLE}")
+#  endif()
+#endif()
+
 project(SW4 C CXX Fortran)
 
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/configs/")
@@ -31,7 +66,7 @@ site_name(HOSTNAME)
 set(USERNAME $ENV{USER})
 today(CURDATETIME)
 
-find_package(MPI REQUIRED)
+find_package(MPI REQUIRED COMPONENTS C CXX)
 
 if(NOT PROJ_OSGEO4W_HOME)
   set(PROJ_OSGEO4W_HOME ${PROJ_HOME})
@@ -244,9 +279,11 @@ endif()
 
 set(TESTING_LEVEL 0 CACHE STRING "Level of testing thoroughness: 0=short tests (<1 minute each), 2=all tests (may take an hour)")
 set(MPI_NUM_TEST_PROCS 4 CACHE STRING "Number of MPI processes to use in tests")
+set(OMP_NUM_TEST_THREADS 2 CACHE STRING "OpenMP threads per MPI rank in tests")
 
 set(PYTEST_DIR ${CMAKE_SOURCE_DIR}/pytest)
 set(REF_DIR ${CMAKE_SOURCE_DIR}/pytest/reference)
+math(EXPR TEST_NUM_CPUS "${MPI_NUM_TEST_PROCS} * ${OMP_NUM_TEST_THREADS}")
 
 set(TEST_DIRS       twilight               twilight         twilight
                     twilight               twilight         twilight
@@ -361,6 +398,13 @@ foreach(TEST_IND RANGE ${NUM_TESTS})
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
         COMMAND ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} ${MPI_NUM_TEST_PROCS} ${MPIEXEC_PREFLAGS} ${MPIEXEC_POSTFLAGS}
             ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/sw4 ${REF_DIR}/${TEST_DIR}/${TEST_IN_FILE}
+    )
+    # Pin the thread count so an unset OMP_NUM_THREADS doesn't spawn one
+    # thread per core in every rank (badly oversubscribes shared nodes).
+    set_tests_properties(
+        Run_${Test_Name}
+        PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=${OMP_NUM_TEST_THREADS}"
+                   PROCESSORS ${TEST_NUM_CPUS}
     )
 
     set(TEST_REF_FILE ${REF_DIR}/${TEST_DIR}/${RESULT_SUBDIR}/${TEST_BASE_FILE}.txt)
