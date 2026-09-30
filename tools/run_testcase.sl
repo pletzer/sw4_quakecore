@@ -44,7 +44,10 @@ export I_MPI_PIN_CELL=core
 
 root=${SW4_ROOT:-$SLURM_SUBMIT_DIR}
 infile="$root/pytest/reference/${testcase}.in"
-reffile="$root/pytest/reference/${testcase}/TwilightErr.txt"
+# twilight cases write TwilightErr.txt, the Lamb cases LambErr.txt
+errname=TwilightErr.txt
+[ -f "$root/pytest/reference/${testcase}/LambErr.txt" ] && errname=LambErr.txt
+reffile="$root/pytest/reference/${testcase}/${errname}"
 jobid=${SLURM_JOB_ID:-local}
 # per job, so that jobs running at the same time do not wipe each other's runs
 rundir="$root/${name}-runs/${jobid}"
@@ -66,10 +69,12 @@ outpath=$(grep -o 'path=[^ ]*' "$infile" | head -1 | cut -d= -f2)
 outpath=${outpath:-.}
 
 # TwilightErr.txt has a header line "<Displacement|Attenuation> variables (errInf, errL2,
-# solInf)" followed by the values -> "dispInf dispL2 attInf attL2" (- if absent)
+# solInf)" followed by the values; LambErr.txt has one "time errInf errL2 solInf" line per
+# step, of which the last one is used -> "dispInf dispL2 attInf attL2" (- if absent)
 read_errors() {
     [ -f "$1" ] || { echo "- - - -"; return; }
     awk '
+        /^[-+0-9.eE]+[ \t]/      { d = $2 " " $3 }
         /^Displacement variables/ { getline; d = $1 " " $2 }
         /^Attenuation variables/  { getline; a = $1 " " $2 }
         END { print (d == "" ? "- -" : d), (a == "" ? "- -" : a) }
@@ -148,7 +153,7 @@ for combo in $builds; do
 
     wall=$(cat "$workdir/wall.txt" 2>/dev/null || echo -)
     solver=$(solver_seconds "$logfile")
-    read -r dinf dl2 ainf al2 <<< "$(read_errors "$workdir/$outpath/TwilightErr.txt")"
+    read -r dinf dl2 ainf al2 <<< "$(read_errors "$workdir/$outpath/$errname")"
     rows+=("| $platform | $prec | $dinf | $dl2 | $ainf | $al2 | ${solver:--} | $wall | $status |")
     echo "$platform,$prec,$dinf,$dl2,$ainf,$al2,$solver,$wall,$status" | sed 's/,-/,/g' >> "$csvfile"
     echo "${combo}: disp errInf=$dinf errL2=$dl2, att errInf=$ainf errL2=$al2," \
