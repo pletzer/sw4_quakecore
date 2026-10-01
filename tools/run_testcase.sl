@@ -44,9 +44,11 @@ export I_MPI_PIN_CELL=core
 
 root=${SW4_ROOT:-$SLURM_SUBMIT_DIR}
 infile="$root/pytest/reference/${testcase}.in"
-# twilight cases write TwilightErr.txt, the Lamb cases LambErr.txt
+# twilight cases write TwilightErr.txt, the Lamb cases (testlamb in the input) LambErr.txt
 errname=TwilightErr.txt
-[ -f "$root/pytest/reference/${testcase}/LambErr.txt" ] && errname=LambErr.txt
+if [ -f "$root/pytest/reference/${testcase}/LambErr.txt" ] || grep -q "^testlamb" "$infile" 2>/dev/null; then
+    errname=LambErr.txt
+fi
 reffile="$root/pytest/reference/${testcase}/${errname}"
 jobid=${SLURM_JOB_ID:-local}
 # per job, so that jobs running at the same time do not wipe each other's runs
