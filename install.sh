@@ -94,7 +94,7 @@ Usage: ./install.sh [options]
                        dependencies (PMIx, hwloc, libevent, UCX) live in sibling
                        module prefixes.
   --variants "..."     Extra variants for the sw4 spec,
-                       e.g. --variants "precision=single +native ~fftw"
+                       e.g. --variants "precision=single sw4_target=hpc3-genoa ~fftw"
   --sw4-version V      Build a declared package version (e.g. $SW4_REF_VERSION) instead
                        of the commit currently checked out here
   --allow-unpushed     Proceed even if HEAD is not on any remote branch. Spack

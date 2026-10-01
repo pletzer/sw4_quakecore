@@ -140,9 +140,36 @@ this environment could even be concretized.
 | `precision=double\|single` | `double`  | `-DUSE_DOUBLE`                                          |
 | `proj` / `hdf5` / `fftw`   | on        | `+fftw` is needed for randomized material               |
 | `zfp`                      | off       | requires `+hdf5`                                        |
-| `native`                   | off       | `-march=native -mtune=native`; not relocatable          |
+| `sw4_target=…`             | `generic` | `SW4_TARGET` of `cmake/SW4Optimization.cmake` (`hpc3-genoa`, `cascade`, `native`, …); see below |
+| `strict_fp` / `lto`        | off       | `SW4_STRICT_FP` / `SW4_LTO`                             |
+| `cxxflags="…"`             | none      | Passed as `SW4_EXTRA_RELEASE_FLAGS`, after the target's flags |
 | `pytests`                  | off       | installs `pytest/` and the Python the ctest checks need |
 | `build_type`               | `Release` | from `CMakePackage`; use `build_type=Debug`             |
 
 `openmp` is not a variant because `CMakeLists.txt` makes OpenMP unconditionally
 `REQUIRED`.
+
+### Compiler switches
+
+Spack's compiler wrapper adds `-march`/`-mtune` for the spec's `target`, which
+defaults to the build host's microarchitecture, *before* the flags CMake adds.
+So:
+
+- `sw4_target=generic` (the default) adds no architecture flags, and SW4 is
+  built for Spack's `target`. That is the right ISA when you build on the kind
+  of node you run on, but it misses the per-target vector-width choice.
+- A named target, e.g. `sw4_target=hpc3-genoa`, adds that target's `-march`
+  (and `-mprefer-vector-width=512` with GCC where 512-bit vectors pay). It
+  comes after Spack's, so it wins.
+- `sw4_target=auto` reads site environment variables inside the build. On
+  HPC3 it picks the portable x86-64-v3 baseline, which is lower than a
+  genoa-only build. Prefer naming the target.
+- `cxxflags` become `SW4_EXTRA_RELEASE_FLAGS`, which come last. The fastest
+  double-precision genoa build in the gausshill-att-3 tests was:
+
+  ```sh
+  ./install.sh --variants "sw4_target=hpc3-genoa cxxflags='-mprefer-vector-width=256'"
+  ```
+
+The resolved flags are printed in the build log (`spack-build-out.txt` in the
+install prefix's `.spack/`), in the lines starting `SW4 target:`.

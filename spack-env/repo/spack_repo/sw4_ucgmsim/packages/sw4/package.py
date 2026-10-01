@@ -26,6 +26,20 @@ work around from a Makefile build:
 Two variants from the builtin recipe are gone because CMake handles them
 differently: ``openmp`` (CMakeLists makes OpenMP unconditionally ``REQUIRED``)
 and ``debug`` (use ``build_type=Debug``, which CMakePackage provides).
+
+*Compiler switches.*  ``cmake/SW4Optimization.cmake`` picks architecture and
+optimisation flags per deployment target and compiler.  ``sw4_target``,
+``strict_fp`` and ``lto`` pass its options through.  ``cxxflags`` (e.g.
+``cxxflags="-mprefer-vector-width=256"``) becomes ``SW4_EXTRA_RELEASE_FLAGS``,
+so it comes after the target's flags and can override them, and the module's
+fast-math guard sees it.
+
+Spack's compiler wrapper puts the spec's own ``target`` flags (``-march`` for
+the build host's microarchitecture, unless ``target=`` says otherwise) *before*
+CMake's.  So with the default ``sw4_target=generic``, which adds no
+architecture flags, SW4 is built for Spack's ``target``.  A named
+``sw4_target`` overrides that ISA, because the compiler takes the last
+``-march``.
 """
 
 from spack_repo.builtin.build_systems.cmake import CMakePackage
@@ -69,10 +83,35 @@ class Sw4(CMakePackage):
         description="Floating point precision of float_sw4",
     )
     variant(
-        "native",
-        default=False,
-        description="Compile with -march=native -mtune=native (not relocatable)",
+        "sw4_target",
+        default="generic",
+        values=(
+            "generic",
+            "auto",
+            "native",
+            "mn5-gpp",
+            "cascade",
+            "hpc3-genoa",
+            "hpc3-milan",
+            "hpc3-portable",
+            "frontera",
+            "stampede3",
+            "stampede3-spr",
+            "vista",
+        ),
+        multi=False,
+        description=(
+            "SW4_TARGET of cmake/SW4Optimization.cmake. generic adds no -march, "
+            "leaving the ISA to Spack's target; auto guesses from site environment "
+            "variables, which may pick a portable baseline below Spack's target"
+        ),
     )
+    variant(
+        "strict_fp",
+        default=False,
+        description="SW4_STRICT_FP: no FMA contraction, for bit-reproducible results across machines",
+    )
+    variant("lto", default=False, description="SW4_LTO: link-time optimisation")
     variant(
         "pytests",
         default=False,
@@ -97,6 +136,15 @@ class Sw4(CMakePackage):
     depends_on("python", type=("build", "run"), when="+pytests")
     depends_on("py-h5py", type=("build", "run"), when="+pytests+hdf5")
 
+    def flag_handler(self, name, flags):
+        # cxxflags go to CMake as SW4_EXTRA_RELEASE_FLAGS (see cmake_args)
+        # rather than through the wrapper. The wrapper puts them before CMake's
+        # target flags, so e.g. -mprefer-vector-width=256 would lose to the
+        # target's 512.
+        if name == "cxxflags":
+            return (None, None, None)
+        return (flags, None, None)
+
     def cmake_args(self):
         spec = self.spec
 
@@ -107,11 +155,14 @@ class Sw4(CMakePackage):
             self.define_from_variant("USE_FFTW3", "fftw"),
             self.define("USE_SZ", False),
             self.define("USE_DOUBLE", spec.satisfies("precision=double")),
-            # Defaults to empty upstream; -march=native would fight Spack's
-            # target model and make the result non-relocatable.
+            # Empty, so SW4Optimization.cmake chooses flags for SW4_TARGET.
+            self.define("SW4_ARCH_FLAGS", ""),
+            self.define_from_variant("SW4_TARGET", "sw4_target"),
+            self.define_from_variant("SW4_STRICT_FP", "strict_fp"),
+            self.define_from_variant("SW4_LTO", "lto"),
+            # See flag_handler.
             self.define(
-                "SW4_ARCH_FLAGS",
-                "-march=native -mtune=native" if spec.satisfies("+native") else "",
+                "SW4_EXTRA_RELEASE_FLAGS", " ".join(spec.compiler_flags["cxxflags"])
             ),
         ]
 
