@@ -94,6 +94,13 @@ The fix is Spack's own `load_external_modules()`, which runs *after* the scrub.
       modules: [OpenMPI/5.0.8-GCC-14.3.0]
 ```
 
+`install.sh` then *unloads* that module before `spack install`. Spack loads
+an external's module before every build that depends on it, and Spack 1.2
+counts the load as failed when `$LOADEDMODULES` doesn't change. That is all
+Lmod does for a module that is already loaded, so leaving it loaded fails the
+first MPI-dependent build with
+`ModuleLoadError: Module 'OpenMPI/5.0.8-GCC-14.3.0' could not be loaded`.
+
 The module name is matched out of `$LOADEDMODULES` (so it works whether you use
 `--modules` or load them yourself in the job script), handling EasyBuild-style
 `OpenMPI/5.0.8-GCC-14.3.0`, flat names like `openmpi-4.1.5-gcc11`, `mpich/…`,

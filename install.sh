@@ -204,10 +204,9 @@ pin_package_recipes() {
 # -----------------------------------------------------------------------------
 # 1. Host discovery
 # -----------------------------------------------------------------------------
-load_modules() {
-    [[ -n "$MODULES" ]] || return 0
-
-    # Batch shells often have no module function; source the usual initscripts.
+# Batch shells often have no module function; source the usual initscripts.
+# Returns non-zero if there is still no module command.
+ensure_module_cmd() {
     if ! type module >/dev/null 2>&1; then
         for init in /usr/share/lmod/lmod/init/bash \
                     /etc/profile.d/modules.sh \
@@ -220,7 +219,12 @@ load_modules() {
             fi
         done
     fi
-    type module >/dev/null 2>&1 || die "--modules given but no module command is available"
+    type module >/dev/null 2>&1
+}
+
+load_modules() {
+    [[ -n "$MODULES" ]] || return 0
+    ensure_module_cmd || die "--modules given but no module command is available"
 
     log "Loading modules: $MODULES"
     set +u
@@ -466,8 +470,33 @@ install_sw4() {
         return
     fi
 
+    unload_mpi_module
     log "Installing (this is the long part)"
     spack -e "$ENV_DIR" install --fail-fast -j "$JOBS"
+}
+
+# Spack loads an external's module before every build that depends on it, and
+# Spack 1.2 counts the load as failed when LOADEDMODULES doesn't change -- which
+# is all Lmod does for a module that is already loaded:
+#
+#   spack.util.module_cmd.ModuleLoadError: Module 'OpenMPI/5.0.8-GCC-14.3.0' could not be loaded.
+#
+# The MPI module is usually loaded here, though: by --modules, or by the job
+# script, which is how detect_mpi found it. So unload it once host.yaml has
+# recorded it, and let Spack load it per build.
+unload_mpi_module() {
+    [[ -n "$MPI_MODULE" ]] || return 0
+    [[ ":${LOADEDMODULES:-}:" == *":$MPI_MODULE:"* ]] || return 0
+    if ! ensure_module_cmd; then
+        warn "$MPI_MODULE is loaded but there is no module command to unload it; Spack will fail to load it for each build"
+        return 0
+    fi
+    log "Unloading $MPI_MODULE so Spack can load it for each build that needs it"
+    set +u
+    module unload "$MPI_MODULE"
+    set -u
+    [[ ":${LOADEDMODULES:-}:" != *":$MPI_MODULE:"* ]] \
+        || warn "$MPI_MODULE is still loaded; Spack's module load for each build will fail"
 }
 
 summary() {
