@@ -612,6 +612,20 @@ bool EW::parseInputFile( vector<vector<Source*> > & a_GlobalUniqueSources,
       cerr << "Error:  The input file is requesting a topo image but there is no topography command" << endl;
     return false;
   }
+// dt = cfl*h/sqrt((4mu+lambda)/rho) and the largest interior eigenvalue of the
+// 4th order spatial operator is (16/3)(lambda+4mu)/(rho h^2), so dt^2*eig <= (16/3)*cfl^2.
+// The 4th order time stepper is stable for dt^2*eig <= 12 (cfl 1.5), the 2nd order one
+// for dt^2*eig <= 4 (cfl sqrt(3)/2). This holds with attenuation since the memory
+// variables are recomputed from the corrected displacement (see solve.C). Boundary
+// closures, curvilinear metrics and refinement interfaces lower the practical limit.
+  const float_sw4 cflStable = mOrder == 4 ? 1.5 : 0.5*sqrt(3.0);
+  if( mCFL > cflStable )
+  {
+    if (m_myRank == 0)
+      cerr << "Error: cfl=" << mCFL << " exceeds the von Neumann stability limit " << cflStable
+           << " of the order " << mOrder << " time stepper" << endl;
+    return false;
+  }
 // if we made it this far, the object should be ready for time stepping
   return true;
 }
