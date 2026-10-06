@@ -1,0 +1,178 @@
+diff --git a/src/rhs4th3fortc.C b/src/rhs4th3fortc.C
+index be63a9e..8549d7c 100644
+--- a/src/rhs4th3fortc.C
++++ b/src/rhs4th3fortc.C
+@@ -1,5 +1,6 @@
+ #include "sw4.h"
+ #include <cstdlib>
++#include <vector>
+ #include <cmath>
+ 
+ #ifdef _OPENMP
+@@ -1076,24 +1077,52 @@ static void rhs4th3fortsgstr_ci_impl( int ifirst, int ilast, int jfirst, int jla
+    // OP=='-' instantiation (attenuation then subtracted L_a(alpha) once per thread).
+    if( OP == '=' )
+       rhs4_zero_lu_halo( a_lu, ifirst, ilast, jfirst, jlast, kfirst, klast, kw1, kw2 );
++   // Per-thread line buffers for the interior loop: x-direction quantities that the i-loop
++   // below would otherwise recompute at i-2..i+2 for every i, evaluated once per point of the
++   // (j,k) line. b_ms = mu*strx and b_ls = la*strx (the xx coefficients), and the coefficient
++   // times the inner 4th-order difference of the four mixed terms whose outer derivative is
++   // in x: b_lvy (la*v_y)_x and b_lwz (la*w_z)_x in r1, b_muy (mu*u_y)_x in r2, b_muz
++   // (mu*u_z)_x in r3. About 11% fewer flops; the rounding differs in the last bits.
++   std::vector<float_sw4> xbuf( 6*static_cast<size_t>(ni) );
++   float_sw4* __restrict__ b_ms  = xbuf.data();
++   float_sw4* __restrict__ b_ls  = b_ms  + ni;
++   float_sw4* __restrict__ b_lvy = b_ls  + ni;
++   float_sw4* __restrict__ b_lwz = b_lvy + ni;
++   float_sw4* __restrict__ b_muy = b_lwz + ni;
++   float_sw4* __restrict__ b_muz = b_muy + ni;
+ #pragma omp for collapse(2) schedule(static,jblk) nowait
+    for( k= k1; k <= k2 ; k++ )
+       for( j=jfirst+2; j <= jlast-2 ; j++ )
+-	 //#pragma simd
++      {
++#pragma omp simd
++	 for( int ii=ifirst ; ii <= ilast ; ii++ )
++	 {
++	    const int o = ii-ifirst;
++	    b_ms[o]  = mu(ii,j,k)*strx(ii);
++	    b_ls[o]  = la(ii,j,k)*strx(ii);
++	    b_lvy[o] = la(ii,j,k)*(u(2,ii,j-2,k)-u(2,ii,j+2,k)+
++				  8*(-u(2,ii,j-1,k)+u(2,ii,j+1,k)));
++	    b_lwz[o] = la(ii,j,k)*(u(3,ii,j,k-2)-u(3,ii,j,k+2)+
++				  8*(-u(3,ii,j,k-1)+u(3,ii,j,k+1)));
++	    b_muy[o] = mu(ii,j,k)*(u(1,ii,j-2,k)-u(1,ii,j+2,k)+
++				  8*(-u(1,ii,j-1,k)+u(1,ii,j+1,k)));
++	    b_muz[o] = mu(ii,j,k)*(u(1,ii,j,k-2)-u(1,ii,j,k+2)+
++				  8*(-u(1,ii,j,k-1)+u(1,ii,j,k+1)));
++	 }
+ #pragma ivdep
+ #pragma omp simd
+ 	 for( i=ifirst+2; i <= ilast-2 ; i++ )
+ 	 {
+ 
+ /* from inner_loop_4a, 28x3 = 84 ops */
+-            mux1 = mu(i-1,j,k)*strx(i-1)-
+-	       tf*(mu(i,j,k)*strx(i)+mu(i-2,j,k)*strx(i-2));
+-            mux2 = mu(i-2,j,k)*strx(i-2)+mu(i+1,j,k)*strx(i+1)+
+-	       3*(mu(i,j,k)*strx(i)+mu(i-1,j,k)*strx(i-1));
+-            mux3 = mu(i-1,j,k)*strx(i-1)+mu(i+2,j,k)*strx(i+2)+
+-	       3*(mu(i+1,j,k)*strx(i+1)+mu(i,j,k)*strx(i));
+-            mux4 = mu(i+1,j,k)*strx(i+1)-
+-	       tf*(mu(i,j,k)*strx(i)+mu(i+2,j,k)*strx(i+2));
++            mux1 = b_ms[i-1-ifirst]-
++	       tf*(b_ms[i-ifirst]+b_ms[i-2-ifirst]);
++            mux2 = b_ms[i-2-ifirst]+b_ms[i+1-ifirst]+
++	       3*(b_ms[i-ifirst]+b_ms[i-1-ifirst]);
++            mux3 = b_ms[i-1-ifirst]+b_ms[i+2-ifirst]+
++	       3*(b_ms[i+1-ifirst]+b_ms[i-ifirst]);
++            mux4 = b_ms[i+1-ifirst]-
++	       tf*(b_ms[i-ifirst]+b_ms[i+2-ifirst]);
+ 
+             muy1 = mu(i,j-1,k)*stry(j-1)-
+ 	       tf*(mu(i,j,k)*stry(j)+mu(i,j-2,k)*stry(j-2));
+@@ -1114,17 +1143,17 @@ static void rhs4th3fortsgstr_ci_impl( int ifirst, int ilast, int jfirst, int jla
+ 	       tf*(mu(i,j,k)*strz(k)+mu(i,j,k+2)*strz(k+2));
+ /* xx, yy, and zz derivatives:*/
+ /* 75 ops */
+-            r1 = i6*( strx(i)*( (2*mux1+la(i-1,j,k)*strx(i-1)-
+-               tf*(la(i,j,k)*strx(i)+la(i-2,j,k)*strx(i-2)))*
++            r1 = i6*( strx(i)*( (2*mux1+b_ls[i-1-ifirst]-
++               tf*(b_ls[i-ifirst]+b_ls[i-2-ifirst]))*
+                               (u(1,i-2,j,k)-u(1,i,j,k))+
+-           (2*mux2+la(i-2,j,k)*strx(i-2)+la(i+1,j,k)*strx(i+1)+
+-                3*(la(i,j,k)*strx(i)+la(i-1,j,k)*strx(i-1)))*
++           (2*mux2+b_ls[i-2-ifirst]+b_ls[i+1-ifirst]+
++                3*(b_ls[i-ifirst]+b_ls[i-1-ifirst]))*
+                               (u(1,i-1,j,k)-u(1,i,j,k))+ 
+-           (2*mux3+la(i-1,j,k)*strx(i-1)+la(i+2,j,k)*strx(i+2)+
+-                3*(la(i+1,j,k)*strx(i+1)+la(i,j,k)*strx(i)))*
++           (2*mux3+b_ls[i-1-ifirst]+b_ls[i+2-ifirst]+
++                3*(b_ls[i+1-ifirst]+b_ls[i-ifirst]))*
+                               (u(1,i+1,j,k)-u(1,i,j,k))+
+-                (2*mux4+ la(i+1,j,k)*strx(i+1)-
+-               tf*(la(i,j,k)*strx(i)+la(i+2,j,k)*strx(i+2)))*
++                (2*mux4+ b_ls[i+1-ifirst]-
++               tf*(b_ls[i-ifirst]+b_ls[i+2-ifirst]))*
+                 (u(1,i+2,j,k)-u(1,i,j,k)) ) + stry(j)*(
+                      muy1*(u(1,i,j-2,k)-u(1,i,j,k)) + 
+                      muy2*(u(1,i,j-1,k)-u(1,i,j,k)) + 
+@@ -1185,24 +1214,16 @@ static void rhs4th3fortsgstr_ci_impl( int ifirst, int ilast, int jfirst, int jla
+ /* 116 ops for r1 */
+ /*   (la*v_y)_x */
+             r1 = r1 + strx(i)*stry(j)*
+-                 i144*( la(i-2,j,k)*(u(2,i-2,j-2,k)-u(2,i-2,j+2,k)+
+-                             8*(-u(2,i-2,j-1,k)+u(2,i-2,j+1,k))) - 8*(
+-                        la(i-1,j,k)*(u(2,i-1,j-2,k)-u(2,i-1,j+2,k)+
+-                             8*(-u(2,i-1,j-1,k)+u(2,i-1,j+1,k))) )+8*(
+-                        la(i+1,j,k)*(u(2,i+1,j-2,k)-u(2,i+1,j+2,k)+
+-                             8*(-u(2,i+1,j-1,k)+u(2,i+1,j+1,k))) ) - (
+-                        la(i+2,j,k)*(u(2,i+2,j-2,k)-u(2,i+2,j+2,k)+
+-                             8*(-u(2,i+2,j-1,k)+u(2,i+2,j+1,k))) )) 
++                 i144*( b_lvy[i-2-ifirst] - 8*(
++                        b_lvy[i-1-ifirst] )+8*(
++                        b_lvy[i+1-ifirst] ) - (
++                        b_lvy[i+2-ifirst] )) 
+ /*   (la*w_z)_x */
+                + strx(i)*strz(k)*       
+-                 i144*( la(i-2,j,k)*(u(3,i-2,j,k-2)-u(3,i-2,j,k+2)+
+-                             8*(-u(3,i-2,j,k-1)+u(3,i-2,j,k+1))) - 8*(
+-                        la(i-1,j,k)*(u(3,i-1,j,k-2)-u(3,i-1,j,k+2)+
+-                             8*(-u(3,i-1,j,k-1)+u(3,i-1,j,k+1))) )+8*(
+-                        la(i+1,j,k)*(u(3,i+1,j,k-2)-u(3,i+1,j,k+2)+
+-                             8*(-u(3,i+1,j,k-1)+u(3,i+1,j,k+1))) ) - (
+-                        la(i+2,j,k)*(u(3,i+2,j,k-2)-u(3,i+2,j,k+2)+
+-                             8*(-u(3,i+2,j,k-1)+u(3,i+2,j,k+1))) )) 
++                 i144*( b_lwz[i-2-ifirst] - 8*(
++                        b_lwz[i-1-ifirst] )+8*(
++                        b_lwz[i+1-ifirst] ) - (
++                        b_lwz[i+2-ifirst] )) 
+ /*   (mu*v_x)_y */
+                + strx(i)*stry(j)*       
+                  i144*( mu(i,j-2,k)*(u(2,i-2,j-2,k)-u(2,i+2,j-2,k)+
+@@ -1227,14 +1248,10 @@ static void rhs4th3fortsgstr_ci_impl( int ifirst, int ilast, int jfirst, int jla
+ /* 116 ops for r2 */
+ /*   (mu*u_y)_x */
+             r2 = r2 + strx(i)*stry(j)*
+-                 i144*( mu(i-2,j,k)*(u(1,i-2,j-2,k)-u(1,i-2,j+2,k)+
+-                             8*(-u(1,i-2,j-1,k)+u(1,i-2,j+1,k))) - 8*(
+-                        mu(i-1,j,k)*(u(1,i-1,j-2,k)-u(1,i-1,j+2,k)+
+-                             8*(-u(1,i-1,j-1,k)+u(1,i-1,j+1,k))) )+8*(
+-                        mu(i+1,j,k)*(u(1,i+1,j-2,k)-u(1,i+1,j+2,k)+
+-                             8*(-u(1,i+1,j-1,k)+u(1,i+1,j+1,k))) ) - (
+-                        mu(i+2,j,k)*(u(1,i+2,j-2,k)-u(1,i+2,j+2,k)+
+-                             8*(-u(1,i+2,j-1,k)+u(1,i+2,j+1,k))) )) 
++                 i144*( b_muy[i-2-ifirst] - 8*(
++                        b_muy[i-1-ifirst] )+8*(
++                        b_muy[i+1-ifirst] ) - (
++                        b_muy[i+2-ifirst] )) 
+ /* (la*u_x)_y */
+               + strx(i)*stry(j)*
+                  i144*( la(i,j-2,k)*(u(1,i-2,j-2,k)-u(1,i+2,j-2,k)+
+@@ -1268,14 +1285,10 @@ static void rhs4th3fortsgstr_ci_impl( int ifirst, int ilast, int jfirst, int jla
+ /* 116 ops for r3 */
+ /*  (mu*u_z)_x */
+             r3 = r3 + strx(i)*strz(k)*
+-                 i144*( mu(i-2,j,k)*(u(1,i-2,j,k-2)-u(1,i-2,j,k+2)+
+-                             8*(-u(1,i-2,j,k-1)+u(1,i-2,j,k+1))) - 8*(
+-                        mu(i-1,j,k)*(u(1,i-1,j,k-2)-u(1,i-1,j,k+2)+
+-                             8*(-u(1,i-1,j,k-1)+u(1,i-1,j,k+1))) )+8*(
+-                        mu(i+1,j,k)*(u(1,i+1,j,k-2)-u(1,i+1,j,k+2)+
+-                             8*(-u(1,i+1,j,k-1)+u(1,i+1,j,k+1))) ) - (
+-                        mu(i+2,j,k)*(u(1,i+2,j,k-2)-u(1,i+2,j,k+2)+
+-                             8*(-u(1,i+2,j,k-1)+u(1,i+2,j,k+1))) )) 
++                 i144*( b_muz[i-2-ifirst] - 8*(
++                        b_muz[i-1-ifirst] )+8*(
++                        b_muz[i+1-ifirst] ) - (
++                        b_muz[i+2-ifirst] )) 
+ /* (mu*v_z)_y */
+               + stry(j)*strz(k)*
+                  i144*( mu(i,j-2,k)*(u(2,i,j-2,k-2)-u(2,i,j-2,k+2)+
+@@ -1312,6 +1325,7 @@ static void rhs4th3fortsgstr_ci_impl( int ifirst, int ilast, int jfirst, int jla
+ 	    SW4_LU_STORE(2, cof*r2);
+ 	    SW4_LU_STORE(3, cof*r3);
+ 	 }
++      }
+       if( onesided[4]==1 )
+       {
+ #pragma omp for collapse(2) schedule(static,jblk) nowait
