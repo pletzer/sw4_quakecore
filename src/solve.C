@@ -885,6 +885,32 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 // communicate across processor boundaries
        for(int g=0 ; g < mNumberOfGrids ; g++ )
 	  communicate_array( Up[g], g );
+// Re-evaluate the memory variables with the CORRECTED displacement.
+// updateMemVarCorr above built AlphaVEp from the predictor Up, and the
+// corrector used it. Carrying that alpha forward makes the attenuating
+// scheme unstable for dt^2*lambda > ~5.4 (about CFL 1.06), at the time
+// stepper's highest frequency 1/(3 dt). Recomputing alpha^{n+1} from the
+// corrected Up keeps the same 4th order formula and accuracy and is stable
+// for the whole elastic CFL range in a von Neumann analysis.
+// AlphaVEm holds alpha_tt (evalDpDmInTimeAtt); recover alpha^{n-1} in place,
+// update, and restore alpha_tt for the interface conditions in enforceIC.
+       if( m_use_attenuation && m_number_mechanisms > 0 )
+       {
+          const float_sw4 dt2 = mDt*mDt;
+          for( int g=0 ; g < mNumberOfGrids ; g++ )
+             for( int a=0 ; a < m_number_mechanisms ; a++ )
+             {
+                float_sw4* alp = AlphaVEp[g][a].c_ptr();
+                float_sw4* al  = AlphaVE[g][a].c_ptr();
+                float_sw4* alm = AlphaVEm[g][a].c_ptr();
+                const size_t n = AlphaVEm[g][a].m_npts; // includes all components
+#pragma omp parallel for simd
+                for( size_t i=0 ; i < n ; i++ )
+                   alm[i] = dt2*alm[i] - alp[i] + 2*al[i];
+             }
+          updateMemVarCorr( AlphaVEp, AlphaVEm, Up, U, Um, t );
+          evalDpDmInTimeAtt( AlphaVEp, AlphaVE, AlphaVEm );
+       }
 
        if( m_output_detailed_timing )
           time_measure[14] = MPI_Wtime();
