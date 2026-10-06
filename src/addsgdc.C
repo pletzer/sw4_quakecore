@@ -193,7 +193,6 @@ void EW::addsgd4_ci( int ifirst, int ilast, int jfirst, int jlast,
       for( int k=sl[s][0]; k <= sl[s][1] ; k++ )
 	 for( int j=sl[s][2]; j <= sl[s][3] ; j++ )
 	    //#pragma simd
-#pragma ivdep
 #pragma omp simd
 	    for( int i=sl[s][4]; i <= sl[s][5] ; i++ )
 	    {
@@ -312,7 +311,6 @@ void EW::addsgd6_ci( int ifirst, int ilast, int jfirst, int jlast,
       for( int k=sl[s][0]; k <= sl[s][1] ; k++ )
 	 for( int j=sl[s][2]; j <= sl[s][3] ; j++ )
 	    //#pragma simd
-#pragma ivdep
 #pragma omp simd
 	    for( int i=sl[s][4]; i <= sl[s][5] ; i++ )
 	    {
@@ -430,7 +428,6 @@ void EW::addsgd4c_ci( int ifirst, int ilast, int jfirst, int jlast,
       for( int k=sl[s][0]; k <= sl[s][1] ; k++ )
 	 for( int j=sl[s][2]; j <= sl[s][3] ; j++ )
 	    //#pragma simd
-#pragma ivdep
 #pragma omp simd
 	    for( int i=sl[s][4]; i <= sl[s][5] ; i++ )
 	    {
@@ -530,7 +527,6 @@ void EW::addsgd6c_ci(  int ifirst, int ilast, int jfirst, int jlast,
       for( int k=sl[s][0]; k <= sl[s][1] ; k++ )
 	 for( int j=sl[s][2]; j <= sl[s][3] ; j++ )
 	    //#pragma simd
-#pragma ivdep
 #pragma omp simd
 	    for( int i=sl[s][4]; i <= sl[s][5] ; i++ )
 	    {
