@@ -24,7 +24,7 @@ case "$compiler" in
     ;;
   clang)
     # Fortran stays on gfortran: Ubuntu's flang is not yet a drop-in.
-    $SUDO apt-get install -y -q --no-install-recommends clang libomp-dev
+    $SUDO apt-get install -y -q --no-install-recommends clang libomp-dev clang-tidy
     ;;
   intel)
     curl -fsSL https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
