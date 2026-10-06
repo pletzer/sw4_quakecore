@@ -29,11 +29,18 @@
 # reported as the platform, the rest as the precision:
 #
 #     SW4_BUILDS="gimkl-default gimkl-genoa-default" sbatch tools/run_testcase.sl ...
+#
+# SW4_THREADS sets the OpenMP threads per rank (default: --cpus-per-task). With SW4_PIN=compact
+# (srun launch only) the ranks are packed onto adjacent cores within L3 domains, SW4_THREADS
+# each; e.g. on a reserved socket (4 x 21 = the 84 cores of one EPYC 9634) with 2 threads/rank:
+#
+#     SW4_LAUNCH=srun SW4_THREADS=2 SW4_PIN=compact sbatch --cpus-per-task=21 \
+#         --ntasks-per-socket=4 --mem-per-cpu=512M tools/run_testcase.sl lamb/lamb-3
 
 testcase=${1:-meshrefine/refine-el-2}
 name=$(basename "$testcase")
 
-export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-1}
+export OMP_NUM_THREADS=${SW4_THREADS:-${SLURM_CPUS_PER_TASK:-1}}
 export OMP_PROC_BIND=close
 export OMP_PLACES=cores
 # Intel MPI (gimkl, intel): give each rank OMP_NUM_THREADS cores. Without
@@ -96,8 +103,45 @@ solver_seconds() {
     }'
 }
 
+# srun binding: one rank per core set; SW4_PIN=compact packs the ranks within L3 domains
+srun_bind="--cpu-bind=cores"
+if [ "${SW4_PIN:-slurm}" = compact ]; then
+    masks=$(/usr/bin/python3 - "$ntasks" "$OMP_NUM_THREADS" <<'EOP'
+import os, sys
+ntasks, nthr = int(sys.argv[1]), int(sys.argv[2])
+def parse(s):
+    out = []
+    for part in s.strip().split(","):
+        a, _, b = part.partition("-")
+        out += range(int(a), int(b or a) + 1)
+    return out
+def read(p):
+    with open(p) as f:
+        return f.read()
+allowed = set(os.sched_getaffinity(0))
+cores = sorted(c for c in allowed
+               if min(parse(read(f"/sys/devices/system/cpu/cpu{c}/topology/thread_siblings_list"))) == c)
+groups = {}
+for c in cores:
+    l3 = min(parse(read(f"/sys/devices/system/cpu/cpu{c}/cache/index3/shared_cpu_list")))
+    groups.setdefault(l3, []).append(c)
+chunks = []
+for l3 in sorted(groups):
+    g = groups[l3]
+    chunks += [g[i:i + nthr] for i in range(0, len(g) - nthr + 1, nthr)]
+if len(chunks) < ntasks:
+    sys.exit(f"only {len(chunks)} groups of {nthr} cores within one L3 domain in {sorted(allowed)}")
+print(",".join(hex(sum(1 << c for c in ch)) for ch in chunks[:ntasks]))
+EOP
+) || exit 1
+    srun_bind="--cpu-bind=mask_cpu:$masks"
+    # srun places the ranks; Intel MPI must not re-pin them
+    export I_MPI_PIN=off
+fi
+
 mkdir -p "$rundir"
 echo "test case: $testcase, node: $(hostname), ranks: $ntasks, threads/rank: $OMP_NUM_THREADS"
+echo "srun binding (SW4_LAUNCH=srun): $srun_bind"
 echo "pinning: OMP_PROC_BIND=$OMP_PROC_BIND OMP_PLACES=$OMP_PLACES I_MPI_PIN_DOMAIN=$I_MPI_PIN_DOMAIN I_MPI_PIN_CELL=$I_MPI_PIN_CELL SW4_LAUNCH=${SW4_LAUNCH:-mpirun}"
 
 rows=()
@@ -130,12 +174,12 @@ for combo in $builds; do
         # Slurm allocation. Any other value is used as the launch command verbatim.
         if [ "$SW4_LAUNCH" = srun ]; then
             if mpirun --version 2>&1 | grep -q "Open MPI) 5"; then
-                launch="srun --mpi=pmix --cpu-bind=cores"    # Open MPI 5 dropped PMI2
+                launch="srun --mpi=pmix $srun_bind"    # Open MPI 5 dropped PMI2
             elif mpirun --version 2>&1 | grep -q "Open MPI"; then
-                launch="srun --mpi=pmi2 --cpu-bind=cores"
+                launch="srun --mpi=pmi2 $srun_bind"
             else
                 export I_MPI_PMI_LIBRARY=/usr/lib64/libpmi2.so
-                launch="srun --mpi=pmi2 --cpu-bind=cores"
+                launch="srun --mpi=pmi2 $srun_bind"
             fi
         elif [ -n "$SW4_LAUNCH" ]; then
             launch="$SW4_LAUNCH"
