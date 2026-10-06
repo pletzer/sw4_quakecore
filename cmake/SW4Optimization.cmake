@@ -66,6 +66,12 @@ foreach(_bad_flag "-ffast-math" "-Ofast" "-funsafe-math-optimizations"
                   "-fassociative-math" "-ffinite-math-only" "-freciprocal-math"
                   "-fno-honor-nans" "-ffp-contract=fast -ffast-math"
                   "-fp-model=fast" "-fp-model fast")
+  # icpx -fp-model=fast is acceptable once finite-math-only is turned back off:
+  # NaNs are then honoured and the isnan() guards survive.
+  if(_bad_flag MATCHES "^-fp-model" AND
+     "${_sw4_all_flags}" MATCHES "-fno-finite-math-only|-fhonor-nans")
+    continue()
+  endif()
   if("${_sw4_all_flags}" MATCHES "${_bad_flag}")
     message(FATAL_ERROR
       "${_bad_flag} was found in one of: ${_sw4_flag_vars}, or in "

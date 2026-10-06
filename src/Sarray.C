@@ -548,8 +548,8 @@ void Sarray::set_to_zero()
 #pragma omp parallel for collapse(2)
       for( int k=m_kb ; k <= m_ke ; k++ )
 	 for( int j=m_jb ; j <= m_je ; j++ )
-#pragma ivdep
 #pragma omp simd
+#pragma ivdep
 	    for( int i=m_ib ; i <= m_ie ; i++ )
 	       m_data[m_base+m_offc*c+i+m_offj*j+m_offk*k] = 0;
 }
@@ -561,8 +561,8 @@ void Sarray::set_to_minusOne()
 #pragma omp parallel for collapse(2)
       for( int k=m_kb ; k <= m_ke ; k++ )
 	 for( int j=m_jb ; j <= m_je ; j++ )
-#pragma ivdep
 #pragma omp simd
+#pragma ivdep
 	    for( int i=m_ib ; i <= m_ie ; i++ )
 	       m_data[m_base+m_offc*c+i+m_offj*j+m_offk*k] = -1.;
 }
@@ -574,8 +574,8 @@ void Sarray::set_value( float_sw4 scalar )
 #pragma omp parallel for collapse(2)
       for( int k=m_kb ; k <= m_ke ; k++ )
 	 for( int j=m_jb ; j <= m_je ; j++ )
-#pragma ivdep
 #pragma omp simd
+#pragma ivdep
 	    for( int i=m_ib ; i <= m_ie ; i++ )
 	       m_data[m_base+m_offc*c+i+m_offj*j+m_offk*k] = scalar;
 }

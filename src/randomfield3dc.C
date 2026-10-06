@@ -273,8 +273,8 @@ void EW::perturbvelocity_ci(int ifirst, int ilast, int jfirst, int jlast, int kf
    {
       float_sw4 A = amp + grad*(zmin + (k-1)*h );
       for( int j=jfirst ; j <= jlast ; j++ )
-#pragma ivdep 
 #pragma omp simd
+#pragma ivdep 
 	 for( int i=ifirst ; i <= ilast ; i++ )
 	 {
 	    const size_t ind = (i-ifirst) + ni*(j-jfirst) + ni*nj*(k-kfirst);
@@ -298,8 +298,8 @@ void EW::perturbvelocityc_ci(int ifirst, int ilast, int jfirst, int jlast, int k
 #pragma omp parallel for
    for( int k=kfirst ; k <= klast ; k++ )
       for( int j=jfirst ; j <= jlast ; j++ )
-#pragma ivdep 
 #pragma omp simd
+#pragma ivdep 
 	 for( int i=ifirst ; i <= ilast ; i++ )
 	 {
 	    const size_t ind = (i-ifirst) + ni*(j-jfirst) + ni*nj*(k-kfirst);
