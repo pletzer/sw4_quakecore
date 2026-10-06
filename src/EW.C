@@ -3939,18 +3939,29 @@ void EW::get_exact_lamb2(vector<Sarray> &a_U, float_sw4 a_t, Source &a_source) {
     tfun = 1;
   else if (a_source.getTfunc() == iC6SmoothBump)
     tfun = 2;
-  // Fortran
-  size_t npts = a_U[g].m_npts;
-  double *uexact = new double[npts];
-  for (size_t i = 0; i < npts; i++)
-    uexact[i] = 0;
+  // lambexact (Fortran) only evaluates the surface k=1, and only where the wave has
+  // arrived; every other point of a_U[g] is zero. So evaluate it into a zeroed buffer of
+  // that one plane and copy the plane in. This used to be a full 3-D double array (~680 MB
+  // per rank on lamb-3) allocated and zeroed by one thread on every time step, then
+  // copied: ~0.3 s per step and rank while the other OpenMP threads idled.
+  // The result is bit-identical.
+  a_U[g].set_to_zero();
+  const int ni = ilast - ifirst + 1;
+  const int nj = jlast - jfirst + 1;
+  std::vector<double> uplane(3 * static_cast<size_t>(ni) * nj, 0.0);
+  int kplane = 1;
   double fzd = fz;
   double d_t = a_t;
-  lambexact(&ifirst, &ilast, &jfirst, &jlast, &kfirst, &klast, uexact, &d_t,
-            &mu, &cs, &x0, &y0, &fzd, &h, &tfun);
-  //	     a_U[g].c_ptr(), &a_t, &mu, &cs, &x0, &y0, &fz, &h, &tfun );
-  a_U[g].assign(uexact, 0);
-  delete[] uexact;
+  lambexact(&ifirst, &ilast, &jfirst, &jlast, &kplane, &kplane, uplane.data(),
+            &d_t, &mu, &cs, &x0, &y0, &fzd, &h, &tfun);
+  if (kfirst <= kplane && kplane <= klast) {
+#pragma omp parallel for
+    for (int j = jfirst; j <= jlast; j++)
+      for (int i = ifirst; i <= ilast; i++)
+        for (int c = 1; c <= 3; c++)
+          a_U[g](c, i, j, kplane) =
+              uplane[(c - 1) + 3 * ((i - ifirst) + static_cast<size_t>(ni) * (j - jfirst))];
+  }
   // test: output uz in one point
   // int i0=176, j0=151, k0=1;
   // if (m_iStart[g] <= i0 && i0 <= m_iEnd[g] && m_jStart[g] <= j0 && j0 <=
