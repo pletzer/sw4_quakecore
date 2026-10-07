@@ -264,7 +264,6 @@ static void curvilinear4sgwind_impl( int ifirst, int ilast, int jfirst, int jlas
       for( int k= klowb; k <= klowe ; k++ )
 	 for( int j=jfirst+2; j <= jlast-2 ; j++ )
 #pragma omp simd
-#pragma ivdep	 
 	    for( int i=ifirst+2; i <= ilast-2 ; i++ )
 	    {
 // 5 ops                  
@@ -779,7 +778,6 @@ static void curvilinear4sgwind_impl( int ifirst, int ilast, int jfirst, int jlas
    for( int k= kmidb ; k <= kmide ; k++ )
       for( int j=jfirst+2; j <= jlast-2 ; j++ )
 #pragma omp simd
-#pragma ivdep	 
 	 for( int i=ifirst+2; i <= ilast-2 ; i++ )
 	 {
 // 5 ops
@@ -1076,7 +1074,6 @@ static void curvilinear4sgwind_impl( int ifirst, int ilast, int jfirst, int jlas
    for( int k= kmidb ; k <= kmide ; k++ )
       for( int j=jfirst+2; j <= jlast-2 ; j++ )
 #pragma omp simd
-#pragma ivdep	 
 	 for( int i=ifirst+2; i <= ilast-2 ; i++ )
 	 {
 // 5 ops
@@ -1382,7 +1379,6 @@ static void curvilinear4sgwind_impl( int ifirst, int ilast, int jfirst, int jlas
    for( int k= kmidb ; k <= kmide ; k++ )
       for( int j=jfirst+2; j <= jlast-2 ; j++ )
 #pragma omp simd
-#pragma ivdep	 
 	 for( int i=ifirst+2; i <= ilast-2 ; i++ )
 	 {
 // 5 ops
@@ -1624,7 +1620,6 @@ static void curvilinear4sgwind_impl( int ifirst, int ilast, int jfirst, int jlas
       for( int k= khighb; k <= khighe ; k++ )
 	 for( int j=jfirst+2; j <= jlast-2 ; j++ )
 #pragma omp simd
-#pragma ivdep	 
 	    for( int i=ifirst+2; i <= ilast-2 ; i++ )
 	    {
 // 5 ops                  

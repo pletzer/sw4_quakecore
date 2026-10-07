@@ -111,7 +111,6 @@ void addsg4wind_ci( float_sw4* __restrict__ a_up, float_sw4*  __restrict__ a_u,
 #pragma omp parallel for
 	for( int j=jfirst+2 ; j<= jlast-2; j++ )
 #pragma omp simd
-#pragma ivdep
 	   //#pragma simd
 	   for( int i=ifirst+2 ; i<= ilast-2; i++ )
 	   {

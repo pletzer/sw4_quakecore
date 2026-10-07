@@ -22,7 +22,6 @@ void EW::twilightfort_ci( int ifirst, int ilast, int jfirst, int jlast, int kfir
       {
          float_sw4 y = (j-1)*h;
 #pragma omp simd
-#pragma ivdep
 	 //#pragma simd
 	 for( int i=ifirst; i<=ilast; i++ )
 	 {
@@ -160,7 +159,6 @@ void EW::twilightfortattc_ci(int ifirst, int ilast, int jfirst, int jlast, int k
    for( int k=kfirst; k<=klast; k++ )
       for( int j=jfirst; j<=jlast; j++ )
 #pragma omp simd
-#pragma ivdep
 	 //#pragma simd
 	 for( int i=ifirst; i<=ilast; i++ )
 	 {

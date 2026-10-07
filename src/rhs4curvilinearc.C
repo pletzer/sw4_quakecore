@@ -46,7 +46,6 @@ int EW::metric_ci( int ib, int ie, int jb, int je, int kb, int ke, float_sw4* __
    for( int k = kb; k <= ke ; k++ )
       for( int j = jb; j <= je ; j++ )
 #pragma omp simd
-#pragma ivdep
 	 for( int i = ib; i <= ie ; i++ )
 	 {
     // k-derivatives
@@ -184,7 +183,6 @@ void EW::metricexgh_ci( int ib, int ie, int jb, int je, int kb, int ke,
    for( int k = kb; k <= ke ; k++ )
       for( int j = jb; j <= je ; j++ )
 #pragma omp simd
-#pragma ivdep
 	 for( int i = ib; i <= ie ; i++ )
 	 {
 	    double zp, zq, zr, zz;
@@ -285,7 +283,6 @@ void EW::freesurfcurvi_ci( int ib, int ie, int jb, int je, int kb, int ke,
    for( int j= jb+2; j<=je-2 ; j++ )
    {
 #pragma omp simd
-#pragma ivdep
       for( int i= ib+2; i<=ie-2 ; i++ )
       {
     // First tangential derivatives
@@ -402,7 +399,6 @@ void EW::getsurfforcing_ci( int ifirst, int ilast, int jfirst, int jlast,
 #pragma omp parallel for
    for( int j=jfirst ; j <= jlast ; j++ )
 #pragma omp simd
-#pragma ivdep
       for( int i=ifirst ; i <=ilast ; i++ )
       {
 	 float_sw4 sqjac = sqrt(jac(i,j,k));
@@ -558,7 +554,6 @@ void EW::addbstressc_ci( int ifirst, int ilast, int jfirst, int jlast,
       float_sw4 sgy  = usesg ? sgstry(j) : 1 ;
       float_sw4 isgy = 1/sgy;
 #pragma omp simd
-#pragma ivdep
       for( int i= ifirst+2; i<=ilast-2 ; i++ )
       {
 	 float_sw4 sgx = usesg ? sgstrx(i) : 1;

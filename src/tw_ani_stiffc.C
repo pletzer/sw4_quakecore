@@ -22,7 +22,6 @@ void EW::tw_ani_stiff_ci( int ifirst, int ilast, int jfirst, int jlast, int kfir
       for( int k=kfirst; k<=klast; k++ )
 	 for( int j=jfirst; j<=jlast; j++ )
 #pragma omp simd
-#pragma ivdep
 	    //#pragma simd
 	    for( int i=ifirst; i<=ilast; i++ )
 	    {
@@ -81,7 +80,6 @@ void EW::tw_ani_curvi_stiff_ci( int ifirst, int ilast, int jfirst, int jlast, in
       for( int k=kfirst; k<=klast; k++ )
 	 for( int j=jfirst; j<=jlast; j++ )
 #pragma omp simd
-#pragma ivdep
 	    //#pragma simd
 	    for( int i=ifirst; i<=ilast; i++ )
 	    {

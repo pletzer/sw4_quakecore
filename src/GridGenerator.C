@@ -29,7 +29,6 @@ int GridGenerator::metric_ci( int ib, int ie, int jb, int je, int kb, int ke, fl
    for( int k = kb; k <= ke ; k++ )
       for( int j = jb; j <= je ; j++ )
 #pragma omp simd
-#pragma ivdep
 	 for( int i = ib; i <= ie ; i++ )
 	 {
     // k-derivatives
