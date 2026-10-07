@@ -47,7 +47,6 @@ void ilanisocurv_ci( int ifirst, int ilast, int jfirst, int jlast, int kfirst, i
 	 for( int k= 1; k <= 6 ; k++ )
 	    for( int j=jfirst+2; j <= jlast-2 ; j++ )
 	       //#pragma simd
-#pragma ivdep	 
 #pragma omp simd
 	       for( int i=ifirst+2; i <= ilast-2 ; i++ )
 	       {
@@ -591,7 +590,6 @@ void ilanisocurv_ci( int ifirst, int ilast, int jfirst, int jlast, int kfirst, i
 	 for( int k=nk-5; k <= nk ; k++ )
 	    for( int j=jfirst+2; j <= jlast-2 ; j++ )
 	       //#pragma simd
-#pragma ivdep	 
 #pragma omp simd
 	       for( int i=ifirst+2; i <= ilast-2 ; i++ )
 	       {
@@ -1130,7 +1128,6 @@ void ilanisocurv_ci( int ifirst, int ilast, int jfirst, int jlast, int kfirst, i
       for( int k=kb; k <= ke ; k++ )
 	 for( int j=jfirst+2; j <= jlast-2 ; j++ )
 	    //#pragma simd
-#pragma ivdep	 
 #pragma omp simd
 	    for( int i=ifirst+2; i <= ilast-2 ; i++ )
 	    {

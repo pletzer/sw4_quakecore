@@ -213,7 +213,6 @@ static void rhs4th3fort_ci_impl( int ifirst, int ilast, int jfirst, int jlast, i
    for( k= k1; k <= k2 ; k++ )
       for( j=jfirst+2; j <= jlast-2 ; j++ )
 //#pragma simd deprecated
-#pragma ivdep
 #pragma omp simd
 	 for( i=ifirst+2; i <= ilast-2 ; i++ )
 	 {
@@ -452,7 +451,6 @@ static void rhs4th3fort_ci_impl( int ifirst, int ilast, int jfirst, int jlast, i
 /* the centered stencil can be used in the x- and y-directions */
 	    for( j=jfirst+2; j<=jlast-2; j++ )
 	       //#pragma simd
-#pragma ivdep
 #pragma omp simd
 	       for( i=ifirst+2; i<=ilast-2; i++ )
 	       {
@@ -714,7 +712,6 @@ static void rhs4th3fort_ci_impl( int ifirst, int ilast, int jfirst, int jlast, i
 	 for(  k = nk-5 ; k <= nk ; k++ )
 	    for(  j=jfirst+2; j<=jlast-2; j++ )
 	       //#pragma simd
-#pragma ivdep
 #pragma omp simd
 	       for(  i=ifirst+2; i<=ilast-2; i++ )
 	       {
@@ -1080,7 +1077,6 @@ static void rhs4th3fortsgstr_ci_impl( int ifirst, int ilast, int jfirst, int jla
    for( k= k1; k <= k2 ; k++ )
       for( j=jfirst+2; j <= jlast-2 ; j++ )
 	 //#pragma simd
-#pragma ivdep
 #pragma omp simd
 	 for( i=ifirst+2; i <= ilast-2 ; i++ )
 	 {
@@ -1319,7 +1315,6 @@ static void rhs4th3fortsgstr_ci_impl( int ifirst, int ilast, int jfirst, int jla
 /* the centered stencil can be used in the x- and y-directions */
 	    for( j=jfirst+2; j<=jlast-2; j++ )
 	       //#pragma simd
-#pragma ivdep
 #pragma omp simd
 	       for( i=ifirst+2; i<=ilast-2; i++ )
 	       {
@@ -1581,7 +1576,6 @@ static void rhs4th3fortsgstr_ci_impl( int ifirst, int ilast, int jfirst, int jla
 	 for(  k = nk-5 ; k <= nk ; k++ )
 	    for(  j=jfirst+2; j<=jlast-2; j++ )
 	       //#pragma simd
-#pragma ivdep
 #pragma omp simd
 	       for(  i=ifirst+2; i<=ilast-2; i++ )
 	       {
@@ -2194,21 +2188,18 @@ void solveattfreeac_ci( int ifirst, int ilast, int jfirst, int jlast,
       int k=0;
 #pragma omp for
       for( int j=jfirst+2; j<=jlast-2; j++)
-#pragma ivdep
 #pragma omp simd
 	 //#pragma simd
 	 for( int i=ifirst+2; i<=ilast-2; i++ )
 	    alpha(1,i,j,k) += cof*up(1,i,j,k);
 #pragma omp for
       for( int j=jfirst+2; j<=jlast-2; j++)
-#pragma ivdep
 #pragma omp simd
 	 //#pragma simd
 	 for( int i=ifirst+2; i<=ilast-2; i++ )
 	    alpha(2,i,j,k) += cof*up(2,i,j,k);
 #pragma omp for
       for( int j=jfirst+2; j<=jlast-2; j++)
-#pragma ivdep
 #pragma omp simd
 	 //#pragma simd
 	 for( int i=ifirst+2; i<=ilast-2; i++ )
@@ -2251,7 +2242,6 @@ void solveattfreec_ci( int ifirst, int ilast, int jfirst, int jlast,
       int k=1, kl=1;
 #pragma omp for
       for( int j=jfirst+2 ; j<=jlast-2 ; j++ )
-#pragma ivdep
 #pragma omp simd
 	 //#pragma simd
 	 for( int i=ifirst+2 ; i<=ilast-2 ; i++ )
@@ -2354,7 +2344,6 @@ void addbstresswresc_ci( int ifirst, int ilast, int jfirst, int jlast,
       float_sw4 sgx = 1, sgy = 1, isgx = 1, isgy = 1;
 #pragma omp for
       for( int j=jfirst+2 ; j<=jlast-2 ; j++ )
-#pragma ivdep
 #pragma omp simd
 	 //#pragma simd
 	 for( int i=ifirst+2 ; i<=ilast-2 ; i++ )
@@ -2531,7 +2520,6 @@ void ve_bndry_stress_curvi_ci( int ifirst, int ilast, int jfirst, int jlast, int
       float_sw4 sgx = 1, sgy = 1, isgx = 1, isgy = 1;
 #pragma omp for
       for( int j=jfirst+2 ; j<=jlast-2 ; j++ )
-#pragma ivdep
 #pragma omp simd
 	 for( int i=ifirst+2 ; i<=ilast-2 ; i++ )
 	 {
@@ -2681,7 +2669,6 @@ void att_free_curvi_ci( int ifirst, int ilast, int jfirst, int jlast, int kfirst
       float_sw4 s0i= 1/sbop[0];
 #pragma omp for
       for( int j=jfirst+2 ; j<=jlast-2 ; j++ )
-#pragma ivdep
 #pragma omp simd
 	 for( int i=ifirst+2 ; i<=ilast-2 ; i++ )
 	 {
