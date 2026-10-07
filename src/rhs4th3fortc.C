@@ -1,5 +1,6 @@
 #include "sw4.h"
 #include <cstdlib>
+#include <unistd.h>
 #include <cmath>
 
 #ifdef _OPENMP
@@ -37,6 +38,56 @@
 // to the next; when nj < nthreads the loop is too thin for any of this to
 // matter. Numerically inert: this moves iterations between threads, changes
 // no arithmetic, and these loops carry no reductions.
+// j-tiles of the interior loops of the Cartesian RHS kernels. Each thread takes whole tiles and
+// sweeps k inside each, so that the planes k-2..k+2 of mu, la and u (5 arrays x 5 planes) for
+// one tile stay in L2 while k advances. Without tiling a thread swept k over its whole share
+// of the j-lines, e.g. ~150 lines and ~4.6 MB on lamb-3 (305 points per line, single precision,
+// 2 threads), which does not fit in Genoa's 1 MB L2. On lamb-3 (AVX-512 icpc build) 16-line
+// tiles made the stretched kernel 15-16% faster (tools/bench_rhs4) and the whole run 6.7%.
+//
+// Width: the lines whose 5 x 5 planes fill half of L2, at least 4; SW4_RHS_JTILE overrides it.
+static int rhs4_jtile( int ni )
+{
+   static const int env = []{
+      const char* e = getenv("SW4_RHS_JTILE");
+      return e ? atoi(e) : 0;
+   }();
+   if( env > 0 )
+      return env;
+   static const long l2 = []{
+      long v = sysconf(_SC_LEVEL2_CACHE_SIZE);
+      return v > 0 ? v : 1048576L;
+   }();
+   const long w = (l2/2) / (25L*ni*static_cast<long>(sizeof(float_sw4)));
+   return w < 4 ? 4 : static_cast<int>(w);
+}
+
+// The j-lines jfirst+2..jlast-2 split into tiles of about rhs4_jtile(ni) lines. The number of
+// tiles is a multiple of the thread count and the widths differ by at most one line, so a
+// static schedule gives every thread the same number of lines. When a thread's share is no
+// wider than one tile, each thread gets one tile and the order is the untiled one.
+// Call inside the parallel region.
+struct Rhs4JTiles
+{
+   int jlo, nlines, njt;
+   int j0( int t ) const { return jlo + static_cast<int>( (static_cast<long>(t)*nlines)/njt ); }
+   int j1( int t ) const { return jlo + static_cast<int>( (static_cast<long>(t+1)*nlines)/njt ) - 1; }
+};
+static inline Rhs4JTiles rhs4_jtiles( int jfirst, int jlast, int ni )
+{
+   Rhs4JTiles t;
+   t.jlo = jfirst+2;
+   t.nlines = jlast-2 - t.jlo + 1;
+   int nthr = 1;
+#ifdef _OPENMP
+   nthr = omp_get_num_threads();
+#endif
+   const int jt = rhs4_jtile( ni );
+   const int per_thread = t.nlines > 0 ? (t.nlines + nthr*jt - 1)/(nthr*jt) : 0;
+   t.njt = nthr*per_thread;
+   return t;
+}
+
 static inline int sw4_jblock( int jbeg, int jend )
 {
    int nj = jend - jbeg + 1;
@@ -51,6 +102,57 @@ static inline int sw4_jblock( int jbeg, int jend )
    return (nj + nthr - 1)/nthr;
 }
 
+// Zero the points of lu that the stencil loops of an OP=='=' kernel never assign: everything
+// outside the box [ifirst+2,ilast-2] x [jfirst+2,jlast-2] x [kw1,kw2] of the 3-component array
+// that spans exactly ifirst..ilast, jfirst..jlast, kfirst..klast (see EW::evalRHS). At 305^3
+// points per rank that is ~4% of the array, where the kernels used to zero all of it first.
+// Called inside the kernel's parallel region, with nowait: the stencil loops write only inside
+// the box, so the two never touch the same element.
+static inline void rhs4_zero_lu_halo( float_sw4* __restrict__ a_lu, int ifirst, int ilast,
+                                      int jfirst, int jlast, int kfirst, int klast, int kw1, int kw2 )
+{
+   const int ni = ilast-ifirst+1;
+   const size_t nij  = static_cast<size_t>(ni)*(jlast-jfirst+1);
+   const size_t nijk = nij*(klast-kfirst+1);
+   // with fewer than 5 points in i the stencil loops assign no i at all
+   const bool no_i_interior = ni < 5;
+#pragma omp for collapse(2) schedule(static) nowait
+   for( int k=kfirst ; k <= klast ; k++ )
+      for( int j=jfirst ; j <= jlast ; j++ )
+      {
+         float_sw4* line = a_lu + (j-jfirst)*static_cast<size_t>(ni) + (k-kfirst)*nij;
+         const bool whole = no_i_interior || k < kw1 || k > kw2 || j < jfirst+2 || j > jlast-2;
+         for( int c=0 ; c < 3 ; c++ )
+         {
+            float_sw4* l = line + c*nijk;
+            if( whole )
+            {
+#pragma omp simd
+               for( int i=0 ; i < ni ; i++ )
+                  l[i] = 0;
+            }
+            else
+            {
+               l[0] = l[1] = 0;
+               l[ni-2] = l[ni-1] = 0;
+            }
+         }
+      }
+}
+
+// The k-planes [kw1,kw2] that the stencil loops of the kernels below assign: [k1,k2] and,
+// with one-sided closures, k=1..6 (onesided[4]) and k=nk-5..nk (onesided[5]). The union is
+// one interval: with a closure the interior starts at 7 or ends at nk-6.
+static inline void rhs4_written_k( const int* onesided, int k1, int k2, int nk, int& kw1, int& kw2 )
+{
+   kw1 = onesided[4] == 1 ? 1  : k1;
+   kw2 = onesided[5] == 1 ? nk : k2;
+   if( onesided[5] == 1 && nk-5 < kw1 )
+      kw1 = nk-5;
+   if( onesided[4] == 1 && 6 > kw2 )
+      kw2 = 6;
+}
+
 
 //extern "C" {
 
@@ -59,9 +161,9 @@ static inline int sw4_jblock( int jbeg, int jend )
 // `lu = a1 * lu + cof * r` with a1 == 0, and the compiler cannot fold that
 // away: for floating point 0*x is not 0 (x may be NaN, Inf or -0.0), so the
 // kernel read the entire 3-component output array back purely to multiply it
-// by zero. SW4_LU_STORE below drops that read. The memset stays, because it
-// also covers the ghost points and the k-range outside [k1,k2] that the
-// stencil loops never assign.
+// by zero. SW4_LU_STORE below drops that read. The ghost points and the
+// k-range outside [k1,k2] that the stencil loops never assign are zeroed by
+// rhs4_zero_lu_halo.
 template<char OP>
 static void rhs4th3fort_ci_impl( int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
 		     int nk, int* __restrict__ onesided, float_sw4* __restrict__ a_acof, 
@@ -109,24 +211,10 @@ static void rhs4th3fort_ci_impl( int ifirst, int ilast, int jfirst, int jlast, i
 
    float_sw4 cof = 1.0/(h*h);
 
-   if constexpr( OP == '=' )
-   {
-      // Threaded. This sits outside the kernel's `#pragma omp parallel` region
-      // and was a plain serial loop writing 3*ni*nj*nk words -- Sarray's own
-      // set_to_zero is threaded, but this open-coded twin was not. Its cost
-      // relative to the parallel region grows linearly with threads per rank,
-      // which is the regime the HPC3 data shows SW4 is actually limited in
-      // (16x4 beats 2x32 by 1.42-2.34x, tracking synchronisation and serial
-      // work rather than bandwidth). Amdahl-fitting the measured cart
-      // 16x4->2x32 divstress ratio puts a serial term of this size at ~13% of
-      // Div-stress at 4 threads/rank and ~54% at 32 -- INFERRED, and exactly
-      // the shape of estimate this campaign has got wrong before, so treat the
-      // magnitude as unverified. The change itself is free and bit-exact.
-#pragma omp parallel for simd
-      for(size_t i=0 ; i < static_cast<size_t>((ilast-ifirst+1))*(jlast-jfirst+1)*(klast-kfirst+1)*3; i++)
-         a_lu[i]=0;
-   }
-   else if constexpr( OP == '-' )
+   // With OP=='=' the points the stencil loops do not assign are zeroed inside the parallel
+   // region below (rhs4_zero_lu_halo). This used to be a separate parallel pass zeroing the
+   // whole 3-component array first -- an extra full write of lu on every call.
+   if constexpr( OP == '-' )
       cof = -cof;
 
 // Assign when OP=='=', accumulate otherwise. See the note above the function.
@@ -142,6 +230,8 @@ static void rhs4th3fort_ci_impl( int ifirst, int ilast, int jfirst, int jlast, i
    k2 = klast-2;
    if( onesided[5] == 1 )
       k2 = nk-6;
+   int kw1, kw2;
+   rhs4_written_k( onesided, k1, k2, nk, kw1, kw2 );
    
 #pragma omp parallel private(k,i,j,mux1,mux2,mux3,mux4,muy1,muy2,muy3,muy4,\
               r1,r2,r3,mucof,mu1zz,mu2zz,mu3zz,lap2mu,q,u3zip2,u3zip1,\
@@ -150,6 +240,11 @@ static void rhs4th3fort_ci_impl( int ifirst, int ilast, int jfirst, int jlast, i
 	      u2zjp2,u2zjp1,u2zjm1,u2zjm2,mu2zy,lau1xz,lau2yz,kb,qb,mb,muz1,muz2,muz3,muz4)
    {
    const int jblk = sw4_jblock( jfirst+2, jlast-2 );
+   // A plain if, not if constexpr: with icpc 2021.5 a discarded `if constexpr` statement
+   // right before the `#pragma omp for` below made every thread run the whole loop in the
+   // OP=='-' instantiation (attenuation then subtracted L_a(alpha) once per thread).
+   if( OP == '=' )
+      rhs4_zero_lu_halo( a_lu, ifirst, ilast, jfirst, jlast, kfirst, klast, kw1, kw2 );
 // nowait on every omp for in this region. Each loop writes a disjoint slice
 // of lu -- the closures write k=1..6 and k=nk-5..nk while the interior writes
 // k1..k2 (k1=7 when the low closure runs, k2=nk-6 when the high one does), and
@@ -165,10 +260,15 @@ static void rhs4th3fort_ci_impl( int ifirst, int ilast, int jfirst, int jlast, i
 // bandwidth: the one phase that is a single long parallel loop was flat while
 // bc, which forks 42 times, degraded 6.5-8.0x. Div-stress carries 3 barriers
 // per Cartesian call and 5 per curvilinear call; this removes all but one.
-#pragma omp for collapse(2) schedule(static,jblk) nowait
+   // Interior, tiled in j (see rhs4_jtile). Every point is computed as before; only the
+   // order of the points changes.
+   const Rhs4JTiles tiles = rhs4_jtiles( jfirst, jlast, ni );
+#pragma omp for schedule(static) nowait
+   for( int jt=0 ; jt < tiles.njt ; jt++ )
+   {
+      const int j0 = tiles.j0(jt), j1 = tiles.j1(jt);
    for( k= k1; k <= k2 ; k++ )
-      for( j=jfirst+2; j <= jlast-2 ; j++ )
-//#pragma simd deprecated
+      for( j=j0; j <= j1 ; j++ )
 #pragma omp simd
 	 for( i=ifirst+2; i <= ilast-2 ; i++ )
 	 {
@@ -400,6 +500,7 @@ static void rhs4th3fort_ci_impl( int ifirst, int ilast, int jfirst, int jlast, i
 	    SW4_LU_STORE(2, cof*r2);
 	    SW4_LU_STORE(3, cof*r3);
 	 }
+   }
       if( onesided[4]==1 )
       {
 #pragma omp for collapse(2) schedule(static,jblk) nowait
@@ -995,24 +1096,10 @@ static void rhs4th3fortsgstr_ci_impl( int ifirst, int ilast, int jfirst, int jla
 
    float_sw4 cof = 1.0/(h*h);
 
-   if constexpr( OP == '=' )
-   {
-      // Threaded. This sits outside the kernel's `#pragma omp parallel` region
-      // and was a plain serial loop writing 3*ni*nj*nk words -- Sarray's own
-      // set_to_zero is threaded, but this open-coded twin was not. Its cost
-      // relative to the parallel region grows linearly with threads per rank,
-      // which is the regime the HPC3 data shows SW4 is actually limited in
-      // (16x4 beats 2x32 by 1.42-2.34x, tracking synchronisation and serial
-      // work rather than bandwidth). Amdahl-fitting the measured cart
-      // 16x4->2x32 divstress ratio puts a serial term of this size at ~13% of
-      // Div-stress at 4 threads/rank and ~54% at 32 -- INFERRED, and exactly
-      // the shape of estimate this campaign has got wrong before, so treat the
-      // magnitude as unverified. The change itself is free and bit-exact.
-#pragma omp parallel for simd
-      for(size_t i=0 ; i < static_cast<size_t>((ilast-ifirst+1))*(jlast-jfirst+1)*(klast-kfirst+1)*3; i++)
-         a_lu[i]=0;
-   }
-   else if constexpr( OP == '-' )
+   // With OP=='=' the points the stencil loops do not assign are zeroed inside the parallel
+   // region below (rhs4_zero_lu_halo). This used to be a separate parallel pass zeroing the
+   // whole 3-component array first -- an extra full write of lu on every call.
+   if constexpr( OP == '-' )
       cof = -cof;
 
 // Assign when OP=='=', accumulate otherwise. See the note above the function.
@@ -1028,6 +1115,8 @@ static void rhs4th3fortsgstr_ci_impl( int ifirst, int ilast, int jfirst, int jla
    k2 = klast-2;
    if( onesided[5] == 1 )
       k2 = nk-6;
+   int kw1, kw2;
+   rhs4_written_k( onesided, k1, k2, nk, kw1, kw2 );
    
 #pragma omp parallel private(k,i,j,mux1,mux2,mux3,mux4,muy1,muy2,muy3,muy4,\
               r1,r2,r3,mucof,mu1zz,mu2zz,mu3zz,lap2mu,q,u3zip2,u3zip1,\
@@ -1036,10 +1125,20 @@ static void rhs4th3fortsgstr_ci_impl( int ifirst, int ilast, int jfirst, int jla
 	      u2zjp2,u2zjp1,u2zjm1,u2zjm2,mu2zy,lau1xz,lau2yz,kb,qb,mb,muz1,muz2,muz3,muz4)
    {
    const int jblk = sw4_jblock( jfirst+2, jlast-2 );
-#pragma omp for collapse(2) schedule(static,jblk) nowait
+   // A plain if, not if constexpr: with icpc 2021.5 a discarded `if constexpr` statement
+   // right before the `#pragma omp for` below made every thread run the whole loop in the
+   // OP=='-' instantiation (attenuation then subtracted L_a(alpha) once per thread).
+   if( OP == '=' )
+      rhs4_zero_lu_halo( a_lu, ifirst, ilast, jfirst, jlast, kfirst, klast, kw1, kw2 );
+   // Interior, tiled in j (see rhs4_jtile). Every point is computed as before; only the
+   // order of the points changes.
+   const Rhs4JTiles tiles = rhs4_jtiles( jfirst, jlast, ni );
+#pragma omp for schedule(static) nowait
+   for( int jt=0 ; jt < tiles.njt ; jt++ )
+   {
+      const int j0 = tiles.j0(jt), j1 = tiles.j1(jt);
    for( k= k1; k <= k2 ; k++ )
-      for( j=jfirst+2; j <= jlast-2 ; j++ )
-	 //#pragma simd
+      for( j=j0; j <= j1 ; j++ )
 #pragma omp simd
 	 for( i=ifirst+2; i <= ilast-2 ; i++ )
 	 {
@@ -1271,6 +1370,7 @@ static void rhs4th3fortsgstr_ci_impl( int ifirst, int ilast, int jfirst, int jla
 	    SW4_LU_STORE(2, cof*r2);
 	    SW4_LU_STORE(3, cof*r3);
 	 }
+   }
       if( onesided[4]==1 )
       {
 #pragma omp for collapse(2) schedule(static,jblk) nowait
