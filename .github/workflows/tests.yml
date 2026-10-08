@@ -2,8 +2,9 @@ name: tests
 
 # Runs the SW4 test suite (tests/README.md) through ctest.
 #
-#   pull requests          the `pr` tier, in double and in float, plus a
-#                          float-vs-double comparison of the workflow problem
+#   pull requests, pushes  the `pr` tier, in double and in float, plus a
+#   to master and          float-vs-double comparison of the workflow problem
+#   single_precision
 #   nightly, on demand     every tier, plus ~/src/workflow's end-to-end test
 #                          driving this SW4 build
 #
@@ -13,6 +14,8 @@ name: tests
 
 on:
   pull_request:
+  push:
+    branches: [ master, single_precision ]
   schedule:
     - cron: "0 13 * * *" # 01:00-02:00 in New Zealand
   workflow_dispatch:
@@ -33,7 +36,7 @@ permissions:
   pull-requests: write
 
 env:
-  # Every pull request runs the pr tier; the nightly run and a manual
+  # Pull requests and pushes to master/single_precision run the pr tier; the nightly run and a manual
   # dispatch without input run everything.
   TIER: ${{ (github.event_name == 'schedule' && 'all') || inputs.tier || 'pr' }}
   # Several MPI tests share the runner: do not pin ranks to cores, and let
