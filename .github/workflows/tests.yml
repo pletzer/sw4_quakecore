@@ -27,7 +27,9 @@ on:
         options: [ pr, all ]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A new push to a PR or branch cancels its in-progress run; nightly and manual
+  # runs are separate groups, so a push never cancels them.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
