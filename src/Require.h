@@ -71,13 +71,13 @@
 if (!(x)) { \
   int myRank; \
   MPI_Comm_rank(MPI_COMM_WORLD, &myRank); \
-  std::cout << "Fatal input error: " << msg << std::endl;	\
+  std::cout << "Fatal input error: " << msg << '\n' << std::flush; /* NOLINT(bugprone-macro-parentheses): msg is a << chain */ \
   MPI_Abort( MPI_COMM_WORLD, 1 );\
 }
 
 #define CHECK_INPUT2(x, msg, fp)			\
 if (!(x)) { \
-  fp << "Fatal input error: " << msg << std::endl;	\
+  (fp) << "Fatal input error: " << msg << '\n' << std::flush; /* NOLINT(bugprone-macro-parentheses): msg is a << chain */ \
 }
 
 // these macros are also used both for optimized and non-optimized code
@@ -85,9 +85,9 @@ if (!(x)) { \
 if (!(x)) { \
   int myRank; \
   MPI_Comm_rank(MPI_COMM_WORLD, &myRank); \
-  std::cout << kind << ": " << msg << std::endl;	\
+  std::cout << (kind) << ": " << msg << '\n' << std::flush; /* NOLINT(bugprone-macro-parentheses): msg is a << chain */ \
   std::cout << "...at line " << __LINE__ <<		\
-     " of file " << __FILE__ << "." << std::endl;	\
+     " of file " << __FILE__ << ".\n" << std::flush;	\
   MPI_Abort( MPI_COMM_WORLD, 1 );\
 }
 #define REQUIRE2(x, msg) DBC_ASSERTION(x, msg, "Precondition violated")
