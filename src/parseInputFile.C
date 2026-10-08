@@ -6146,6 +6146,7 @@ void EW::processRuptureHDF5(char* buffer, vector<vector<Source*> > & a_GlobalUni
 #ifdef USE_HDF5
   int event = 0;
   bool rfileset=false;
+  bool skip_outside=false;
   char rfile[1000];
   double stime, etime;
   stime = MPI_Wtime();
@@ -6193,6 +6194,13 @@ void EW::processRuptureHDF5(char* buffer, vector<vector<Source*> > & a_GlobalUni
 	    event = it->second;
 	 }
       }
+      else if (startswith("outside=",token))
+      {
+         token += 8;
+         CHECK_INPUT( strcmp(token,"error") == 0 || strcmp(token,"skip") == 0,
+                      err << "rupturehdf5 command: outside must be 'error' or 'skip', not '" << token << "'" );
+         skip_outside = strcmp(token,"skip") == 0;
+      }
       else
       {
          badOption("rupturehdf5", token);
@@ -6201,11 +6209,11 @@ void EW::processRuptureHDF5(char* buffer, vector<vector<Source*> > & a_GlobalUni
     }
 
 
+  CHECK_INPUT( rfileset, err << "rupturehdf5 command: file=... must be given" );
   if( event_is_in_proc(event) )
   {
      event = global_to_local_event(event);
-  if( rfileset)
-    readRuptureHDF5(rfile, a_GlobalUniqueSources, this, event, m_global_xmax, m_global_ymax, m_global_zmax, mGeoAz, xmin, ymin, zmin, mVerbose, m_nwriters);
+     readRuptureHDF5(rfile, a_GlobalUniqueSources, this, event, m_global_xmax, m_global_ymax, m_global_zmax, mGeoAz, xmin, ymin, zmin, mVerbose, m_nwriters, skip_outside);
   }
 
   etime = MPI_Wtime();
@@ -6213,8 +6221,7 @@ void EW::processRuptureHDF5(char* buffer, vector<vector<Source*> > & a_GlobalUni
   if (proc_zero())
       cout << "Process rupture data, took " << etime-stime << "seconds." << endl;
 #else
-  if (proc_zero())
-    cout << "Using HDF5 rupture input but sw4 is not compiled with HDF5!"<< endl;
+  CHECK_INPUT( false, "rupturehdf5 command: sw4 is not compiled with HDF5 (USE_HDF5)" );
 #endif
 
 } // end processRupture()
@@ -6249,9 +6256,10 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
   char formstring[1000];
   strcpy(formstring, "Discrete");
   char rfile[1000];
+  bool skip_outside=false;
 
 // bounding box
-// only check the z>zmin when we have topography. For a flat free surface, we will remove sources too 
+// only check the z>zmin when we have topography. For a flat free surface, we will remove sources too
 // close or above the surface in the call to mGlobalUniqueSources[i]->correct_Z_level()
   float_sw4 xmin = 0.;
   float_sw4 ymin = 0.;
@@ -6297,6 +6305,13 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
                 std::cout << "Rupture warning: event with name " << token << " not found" << std::endl;
 	 }
       }
+      else if (startswith("outside=",token))
+      {
+         token += 8;
+         CHECK_INPUT( strcmp(token,"error") == 0 || strcmp(token,"skip") == 0,
+                      err << "rupture command: outside must be 'error' or 'skip', not '" << token << "'" );
+         skip_outside = strcmp(token,"skip") == 0;
+      }
       else
       {
          badOption("rupture", token);
@@ -6314,6 +6329,7 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
   float_sw4* par=NULL;
   int* ipar=NULL;
   int npar=0, nipar=0, ncyc=0;
+  CHECK_INPUT( rfileset, err << "rupture command: file=... must be given" );
   if( rfileset )
   {
      //  g(t) defined by spline points on a uniform grid, read from file.
@@ -6373,6 +6389,9 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
 
 // read all point sources
     int nSources=0, nu1=0, nu2=0, nu3=0, nskip_zero_slip=0;
+    // Every rank reads the whole file, so all ranks agree on noutside.
+    int noutside=0;
+    const int max_outside_report = 10;
     for (int pts=0; pts<npts; pts++) 
     {
       double lon, lat, dep, stk, dip, area, tinit, dt, rake, slip1, slip2, slip3;
@@ -6530,10 +6549,13 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
 
 	if (x < xmin || x > m_global_xmax || y < ymin || y > m_global_ymax || z < zmin || z > m_global_zmax)
 	{
+	 // Points with zero slip would be skipped anyway and are not counted.
+	 if (!skip_zero_slip_point && ++noutside <= max_outside_report)
+	 {
 	  stringstream sourceposerr;
 	  sourceposerr << endl
 		       << "***************************************************" << endl
-		       << " ERROR:  Source positioned outside grid!  " << endl
+		       << (skip_outside ? " WARNING:" : " ERROR:") << "  Source positioned outside grid!  " << endl
 		       << endl
 		       << " Source from rupture file @" << endl
 		       << "  x=" << x << " y=" << y << " z=" << z << endl 
@@ -6561,6 +6583,7 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
 	  sourceposerr << "***************************************************" << endl;
 	  if (m_myRank == 0)
 	    cout << sourceposerr.str();
+	 }
 	}
 	else if( !skip_zero_slip_point && event_is_in_proc(event) )
 	{
@@ -6645,6 +6668,26 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
     if (proc_zero() && nskip_zero_slip > 0)
       printf("Skipped %i rupture points with zero slip-velocity integral in u1.\n", nskip_zero_slip);
     
+    if (noutside > 0)
+    {
+      if (skip_outside)
+      {
+        if (proc_zero())
+          printf("WARNING: dropped %i rupture points positioned outside grid (outside=skip)\n", noutside);
+      }
+      else
+      {
+        if (proc_zero())
+          cout << "Fatal input error: rupture: " << noutside << " of " << npts
+               << " rupture points in '" << rfile << "' are positioned outside grid"
+               << (noutside > max_outside_report ? " (first ones listed above)." : ".")
+               << " Enlarge the domain, or add outside=skip to the rupture command"
+               << " to drop these points." << endl;
+        // Make sure rank 0 has printed before anyone aborts.
+        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+      }
+    }
     fclose(fd);
   }
 
