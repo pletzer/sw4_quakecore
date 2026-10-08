@@ -49,11 +49,9 @@ name = "az0-vs-az180"
 kind = "traces_agree"
 runs = ["az0", "az180"]
 rtol = { double = 2e-6, float = 1e-4 }
-xfail = "TimeSeries rotates NS by a spherical-mapping meridian convergence measured from the grid origin (also with proj=tmerc), and EW not at all; frames whose origin is east of the stations get a different NS."
 
 [[check]]
 name = "az0-vs-az270"
 kind = "traces_agree"
 runs = ["az0", "az270"]
 rtol = { double = 2e-6, float = 1e-4 }
-xfail = "TimeSeries rotates NS by a spherical-mapping meridian convergence measured from the grid origin (also with proj=tmerc), and EW not at all; frames whose origin is east of the stations get a different NS."

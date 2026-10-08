@@ -37,4 +37,3 @@ name = "orientation"
 kind = "component_orientation"
 runs = ["nsew", "xyz"]
 tol_deg = 0.05
-xfail = "Measured 2026-10-08 at 168E: NS and EW are rotated about 3.6 deg from true north/east and are up to 0.36 deg from orthogonal. NS/EW are not geographic: TimeSeries applies a spherical-mapping convergence measured from the grid origin to NS only (none to EW), ignoring the tmerc projection's own convergence relative to lon_p."

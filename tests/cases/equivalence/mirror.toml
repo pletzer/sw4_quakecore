@@ -1,4 +1,4 @@
-description = "EQ-09: an explosion at the centre of a square, homogeneous half-space: the four stations 3 km N, S, E and W of it record mirror-image motion (radial components opposite, vertical equal; N/S and E/W pairs and x/y swap)."
+description = "EQ-09: an explosion at the centre of a square, homogeneous half-space: the four stations 3 km N, S, E and W of it record mirror-image motion (radial components opposite, vertical equal; N/S and E/W pairs and x/y swap). Centred on the projection's central meridian (lon_p=173): NS/EW are rotated to true north/east by the meridian convergence at each station, which is antisymmetric E-W about lon_p, so the mirror relations are exact there (at 172.6E the convergence of 0.27 deg varies by 0.026 deg between stations 3 km apart and breaks them by ~4e-6)."
 labels = ["equivalence", "symmetry"]
 input = "eq.in"
 generate = "eq"
@@ -18,6 +18,7 @@ vs = 2300.0
 material = "block vp=4000 vs=2300 rho=2500"
 source = "source x={{src_x}} y={{src_y}} z=2000 mxx=1e15 myy=1e15 mzz=1e15 t0=1.5 freq=3.3333333333 type=Gaussian"
 station_mode = "xy"
+clon = 173.0
 stations = [["N", 0, 3000], ["S", 0, -3000], ["E", 3000, 0], ["W", -3000, 0]]
 recvars = ""
 rec = ""

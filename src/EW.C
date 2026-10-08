@@ -1344,6 +1344,35 @@ void EW::computeGeographicCoord(double x, double y, double &longitude,
   // latitude  = lonlat.v/deg2rad;
 }
 
+//-----------------------------------------------------------------------
+double EW::computeMeridianConvergence(double lon, double lat) {
+  // -----------------------------------------------------------------
+  // Meridian convergence gamma at (lon, lat), in degrees: the true azimuth
+  // (clockwise from true north) of the mapping's grid north. The grid
+  // x-axis points at true azimuth mGeoAz + gamma and the y-axis at
+  // mGeoAz + 90 + gamma. Used to rotate receiver output to true NS/EW and
+  // to convert true-north strikes (SRF STK, source strike=) to the grid.
+  //
+  // With PROJ, gamma comes from the projection itself (relative to its
+  // central meridian, e.g. lon_p for tmerc).
+  //
+  // Without PROJ, SW4's spherical mapping has
+  //   x = mpd*( cos(az)*(lat-lat0) + sin(az)*cos(lat)*(lon-lon0) ),
+  //   y = mpd*(-sin(az)*(lat-lat0) + cos(az)*cos(lat)*(lon-lon0) ),
+  // so the meridian through (lon,lat) has the grid direction
+  // (1, -sin(lat)*(lon-lon0)*pi/180) in the (north, east) frame of the
+  // origin: gamma = atan(sin(lat)*(lon-lon0)*pi/180). This is the angle the
+  // receiver NS component has always used. The mapping is not conformal (it
+  // shears): its parallels stay along grid east, so the orthogonal NS/EW frame
+  // built on the meridian differs from the parallel's direction by gamma. With
+  // mConstMetersPerLongitude meridians are grid-parallel and gamma = 0.
+  // -----------------------------------------------------------------
+  if (m_geoproj != 0) return m_geoproj->computeMeridianConvergence(lon, lat);
+  if (mConstMetersPerLongitude) return 0.0;
+  double deg2rad = M_PI / 180.0;
+  return atan(sin(lat * deg2rad) * (lon - mLonOrigin) * deg2rad) / deg2rad;
+}
+
 //-------------------------------------------------------
 void EW::computeNearestTopoGridPoint(int &iNear, int &jNear, float_sw4 a_x,
                                      float_sw4 a_y) {
