@@ -6537,11 +6537,13 @@ void EW::extractTopographyFromGridFile(string a_topoFileName) {
     latv = new double[Nlat + 1];
     lonv = new double[Nlon + 1];
 
-    // TODO: "%le" writes 8 bytes into gridElev(1,i,j,1), which is float_sw4 (4 bytes in single precision, lonv/latv are genuinely double so those two are fine) -- read into a double temporary and assign.
+    // "%le" fills a double; gridElev is float_sw4 (float in single precision).
     for (j = 1; j <= Nlat; j++)
-      for (i = 1; i <= Nlon; i++)
-        ret = fscanf(gridfile, "%le %le %le", &lonv[i], &latv[j],
-                     &gridElev(1, i, j, 1));
+      for (i = 1; i <= Nlon; i++) {
+        double elev;
+        ret = fscanf(gridfile, "%le %le %le", &lonv[i], &latv[j], &elev);
+        gridElev(1, i, j, 1) = elev;
+      }
     fclose(gridfile);
   } else {
     int fd = open(a_topoFileName.c_str(), O_RDONLY);
@@ -6555,8 +6557,14 @@ void EW::extractTopographyFromGridFile(string a_topoFileName) {
 
     nr = read(fd, lonv, (Nlon + 1) * sizeof(double));
     nr = read(fd, latv, (Nlat + 1) * sizeof(double));
-    // TODO: gridElev's storage is float_sw4* (allocated Nlon*Nlat*sizeof(float_sw4) bytes), but this reads Nlon*Nlat*sizeof(double) bytes -- a 2x heap buffer overflow in single precision; read into a temporary double buffer and assign instead.
-    nr = read(fd, gridElev.c_ptr(), Nlon * Nlat * sizeof(double));
+    // The file stores doubles; gridElev is float_sw4 (float in single
+    // precision), so read into a double buffer and convert.
+    {
+      std::vector<double> elev((size_t)Nlon * Nlat);
+      nr = read(fd, elev.data(), elev.size() * sizeof(double));
+      float_sw4 *gp = gridElev.c_ptr();
+      for (size_t n = 0; n < elev.size(); n++) gp[n] = elev[n];
+    }
     close(fd);
   }
 
@@ -6773,11 +6781,15 @@ void EW::extractTopographyFromCartesianFile(string a_topoFileName) {
   yv = new float_sw4[Ny + 1];
   xv = new float_sw4[Nx + 1];
 
-  // TODO: "%le" writes 8 bytes each into xv[i]/yv[j]/gridElev(1,i,j,1), which are all float_sw4 (4 bytes in single precision) -- read into double temporaries and assign.
+  // "%le" fills a double; xv/yv/gridElev are float_sw4 (float in single precision).
   for (j = 1; j <= Ny; j++)
-    for (i = 1; i <= Nx; i++)
-      ret = fscanf(gridfile, "%le %le %le", &xv[i], &yv[j],
-                   &gridElev(1, i, j, 1));
+    for (i = 1; i <= Nx; i++) {
+      double xd, yd, elev;
+      ret = fscanf(gridfile, "%le %le %le", &xd, &yd, &elev);
+      xv[i] = xd;
+      yv[j] = yd;
+      gridElev(1, i, j, 1) = elev;
+    }
   fclose(gridfile);
 
   if (proc_zero())
@@ -7212,13 +7224,9 @@ void EW::extractTopographyFromRfile(std::string a_topoFileName) {
             << " difference = " << alpha - mGeoAz);
 
     // ---------- origin on file
-    float_sw4 lon0, lat0;
-    // TODO: rfile stores lon0/lat0 as 8-byte doubles on disk (see MaterialRfile.C's correct
-    // "double lon0,lat0; read(fd,&lon0,sizeof(double))"), but this reads only sizeof(float_sw4)
-    // (4 bytes in single precision) then checks nr!=sizeof(double), which always fails in single
-    // precision -- rfile topography silently fails to load in that build. Read into a double
-    // local (matching the file format, independent of float_sw4) and assign to lon0/lat0.
-    nr = read(fd, &lon0, sizeof(float_sw4));
+    // rfile stores lon0/lat0 as 8-byte doubles, independent of float_sw4.
+    double lon0, lat0;
+    nr = read(fd, &lon0, sizeof(double));
     if (nr != sizeof(double)) {
       cout << rname << " Error reading lon0, nr= " << nr << "bytes read"
            << endl;
@@ -7228,7 +7236,7 @@ void EW::extractTopographyFromRfile(std::string a_topoFileName) {
     if (swapbytes)
       bswap.byte_rev(&lon0, 1, "double");
 
-    nr = read(fd, &lat0, sizeof(float_sw4));
+    nr = read(fd, &lat0, sizeof(double));
     if (nr != sizeof(double)) {
       cout << rname << " Error reading lat0, nr= " << nr << "bytes read"
            << endl;

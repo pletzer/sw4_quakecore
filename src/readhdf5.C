@@ -177,7 +177,9 @@ static herr_t traverse_func (hid_t loc_id, const char *grp_name, const H5L_info_
       op_data->winlset = true;
       attr = H5Dopen(grp, "WindowL", H5P_DEFAULT);
       ASSERT(attr > 0);
-      ret = H5Dread(attr, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &op_data->winl);
+      double wtmp; // the file stores a double; winl is float_sw4
+      ret = H5Dread(attr, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &wtmp);
+      op_data->winl = wtmp;
       ASSERT(ret >= 0);
       H5Dclose(attr);
     }
@@ -186,7 +188,9 @@ static herr_t traverse_func (hid_t loc_id, const char *grp_name, const H5L_info_
       op_data->winrset = true;
       attr = H5Dopen(grp, "WindowR", H5P_DEFAULT);
       ASSERT(attr > 0);
-      ret = H5Dread(attr, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &op_data->winr);
+      double wtmp; // the file stores a double; winr is float_sw4
+      ret = H5Dread(attr, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &wtmp);
+      op_data->winr = wtmp;
       ASSERT(ret >= 0);
       H5Dclose(attr);
     }
@@ -739,7 +743,7 @@ static herr_t traverse_func2 (hid_t loc_id, const char *grp_name, const H5L_info
 #else
   H5O_info_t infobuf;
 #endif
-  float data[3];
+  double data[3]; // read with H5T_NATIVE_DOUBLE below (was float[3]: stack overflow)
   int isnsew, ret;
 
   ASSERT(operator_data != NULL);
