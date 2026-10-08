@@ -85,7 +85,7 @@ public:
       srand48( m_seed );
    }
 
-   void record_data( double energy, int step, bool write_file, int myrank, std::string path )
+   void record_data( double energy, int step, bool write_file, int myrank, const std::string& path )
    {
       m_energyvector.push_back(energy);
       if( myrank == 0 )
