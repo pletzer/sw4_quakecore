@@ -6555,7 +6555,7 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
 	  stringstream sourceposerr;
 	  sourceposerr << endl
 		       << "***************************************************" << endl
-		       << (skip_outside ? " WARNING:" : " ERROR:") << "  Source positioned outside grid!  " << endl
+		       << (skip_outside ? " WARNING:" : " ERROR:") << "  Source positioned outside grid!  \n"
 		       << endl
 		       << " Source from rupture file @" << endl
 		       << "  x=" << x << " y=" << y << " z=" << z << endl 
@@ -6682,7 +6682,7 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
                << " rupture points in '" << rfile << "' are positioned outside grid"
                << (noutside > max_outside_report ? " (first ones listed above)." : ".")
                << " Enlarge the domain, or add outside=skip to the rupture command"
-               << " to drop these points." << endl;
+               << " to drop these points." << '\n' << std::flush;
         // Make sure rank 0 has printed before anyone aborts.
         MPI_Barrier(MPI_COMM_WORLD);
         MPI_Abort(MPI_COMM_WORLD, 1);

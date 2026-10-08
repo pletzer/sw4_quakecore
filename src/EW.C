@@ -6533,35 +6533,50 @@ void EW::extractTopographyFromGridFile(string a_topoFileName) {
     FILE *gridfile = fopen(a_topoFileName.c_str(), "r");
 
     ret = fscanf(gridfile, "%i %i", &Nlon, &Nlat);
+    // The bi-cubic interpolation below needs at least 4 points each way.
+    CHECK_INPUT(ret == 2 && Nlon >= 4 && Nlat >= 4,
+                "Topography grid file " << a_topoFileName
+                << ": could not read Nlon Nlat >= 4 from the header");
     gridElev.define(1, 1, Nlon, 1, Nlat, 1, 1);
-    latv = new double[Nlat + 1];
-    lonv = new double[Nlon + 1];
+    latv = new double[Nlat + 1]();
+    lonv = new double[Nlon + 1]();
 
     // "%le" fills a double; gridElev is float_sw4 (float in single precision).
     for (j = 1; j <= Nlat; j++)
       for (i = 1; i <= Nlon; i++) {
-        double elev;
+        double elev = 0;
         ret = fscanf(gridfile, "%le %le %le", &lonv[i], &latv[j], &elev);
+        CHECK_INPUT(ret == 3, "Topography grid file " << a_topoFileName
+                    << ": could not read lon lat elev for point i=" << i
+                    << " j=" << j);
         gridElev(1, i, j, 1) = elev;
       }
     fclose(gridfile);
   } else {
     int fd = open(a_topoFileName.c_str(), O_RDONLY);
-    size_t nr;
-    nr = read(fd, &Nlon, sizeof(int));
-    nr = read(fd, &Nlat, sizeof(int));
+    // Each read must deliver exactly what was asked for.
+    auto read_all = [&](void *buf, size_t nbytes, const char *what) {
+      ssize_t nr = read(fd, buf, nbytes);
+      CHECK_INPUT(nr >= 0 && (size_t)nr == nbytes,
+                  "Topography grid file " << a_topoFileName
+                  << ": short read of " << what);
+    };
+    read_all(&Nlon, sizeof(int), "Nlon");
+    read_all(&Nlat, sizeof(int), "Nlat");
+    CHECK_INPUT(Nlon >= 4 && Nlat >= 4, "Topography grid file "
+                << a_topoFileName << ": Nlon and Nlat must be >= 4");
 
     gridElev.define(1, 1, Nlon, 1, Nlat, 1, 1);
-    latv = new double[Nlat + 1];
-    lonv = new double[Nlon + 1];
+    latv = new double[Nlat + 1]();
+    lonv = new double[Nlon + 1]();
 
-    nr = read(fd, lonv, (Nlon + 1) * sizeof(double));
-    nr = read(fd, latv, (Nlat + 1) * sizeof(double));
+    read_all(lonv, (Nlon + 1) * sizeof(double), "longitudes");
+    read_all(latv, (Nlat + 1) * sizeof(double), "latitudes");
     // The file stores doubles; gridElev is float_sw4 (float in single
     // precision), so read into a double buffer and convert.
     {
       std::vector<double> elev((size_t)Nlon * Nlat);
-      nr = read(fd, elev.data(), elev.size() * sizeof(double));
+      read_all(elev.data(), elev.size() * sizeof(double), "elevations");
       float_sw4 *gp = gridElev.c_ptr();
       for (size_t n = 0; n < elev.size(); n++) gp[n] = elev[n];
     }
@@ -6777,15 +6792,21 @@ void EW::extractTopographyFromCartesianFile(string a_topoFileName) {
   FILE *gridfile = fopen(a_topoFileName.c_str(), "r");
 
   ret = fscanf(gridfile, "%i %i", &Nx, &Ny);
+  // The bi-cubic interpolation below needs at least 4 points each way.
+  VERIFY2(ret == 2 && Nx >= 4 && Ny >= 4,
+          "Cartesian topography file " << a_topoFileName
+          << ": could not read Nx Ny >= 4 from the header");
   gridElev.define(1, 1, Nx, 1, Ny, 1, 1);
-  yv = new float_sw4[Ny + 1];
-  xv = new float_sw4[Nx + 1];
+  yv = new float_sw4[Ny + 1]();
+  xv = new float_sw4[Nx + 1]();
 
   // "%le" fills a double; xv/yv/gridElev are float_sw4 (float in single precision).
   for (j = 1; j <= Ny; j++)
     for (i = 1; i <= Nx; i++) {
-      double xd, yd, elev;
+      double xd = 0, yd = 0, elev = 0;
       ret = fscanf(gridfile, "%le %le %le", &xd, &yd, &elev);
+      VERIFY2(ret == 3, "Cartesian topography file " << a_topoFileName
+              << ": could not read x y elev for point i=" << i << " j=" << j);
       xv[i] = xd;
       yv[j] = yd;
       gridElev(1, i, j, 1) = elev;

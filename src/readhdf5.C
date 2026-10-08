@@ -1029,7 +1029,7 @@ void readRuptureHDF5(char *fname, vector<vector<Source*> > & a_GlobalUniqueSourc
     if (fid >= 0)
       H5Fclose(fid);
     if (rd_err)
-      std::cout << "Fatal input error: rupturehdf5: " << rd_msg.str() << std::endl;
+      std::cout << "Fatal input error: rupturehdf5: " << rd_msg.str() << '\n' << std::flush;
   }// End read_color=0
   etime = MPI_Wtime();
 
@@ -1236,7 +1236,7 @@ void readRuptureHDF5(char *fname, vector<vector<Source*> > & a_GlobalUniqueSourc
         stringstream sourceposerr;
         sourceposerr << endl
                      << "***************************************************" << endl
-                     << (skip_outside ? " WARNING:" : " ERROR:") << "  Source positioned outside grid!  " << endl
+                     << (skip_outside ? " WARNING:" : " ERROR:") << "  Source positioned outside grid!  \n"
                      << endl
                      << " Source from rupture file @" << endl
                      << "  x=" << x << " y=" << y << " z=" << z << endl 
@@ -1325,7 +1325,7 @@ void readRuptureHDF5(char *fname, vector<vector<Source*> > & a_GlobalUniqueSourc
                   << " rupture points in '" << fname << "' are positioned outside grid"
                   << (noutside > max_outside_report ? " (first ones listed above)." : ".")
                   << " Enlarge the domain, or add outside=skip to the rupturehdf5 command"
-                  << " to drop these points." << std::endl;
+                  << " to drop these points." << '\n' << std::flush;
       // Make sure rank 0 has printed before anyone aborts.
       MPI_Barrier(MPI_COMM_WORLD);
       MPI_Abort(MPI_COMM_WORLD, 1);
