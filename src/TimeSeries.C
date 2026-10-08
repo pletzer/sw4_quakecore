@@ -1596,9 +1596,9 @@ void TimeSeries::readFile( EW *ew, bool ignore_utc )
 		  cout << "geographic ";
 	       cout << "components " << endl;
 	    }
-	    float_sw4 tstart, dt, td, ux, uy, uz;
+	    // double, not float_sw4: they are read with "%le"/"%lf" below.
+	    double tstart, dt, td, ux, uy, uz;
 	    int nlines = 0;
-	    // TODO: "%le"/"%lf" below always fill a double, but tstart/dt/td/ux/uy/uz are float_sw4 (4 bytes in single precision) -- read into double temporaries and assign (affects this counting pass and the read pass further down using the same fscanf pattern).
 	    if( fscanf(fd,"%le %le %le %le",&tstart,&ux,&uy,&uz) != EOF )
 	       nlines++;
 	    if( fscanf(fd,"%le %le %le %le",&dt,&ux,&uy,&uz) != EOF )

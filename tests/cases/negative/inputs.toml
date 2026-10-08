@@ -37,7 +37,6 @@ name = "srf-outside-domain"
 params = { src_de = 9000.0 }
 expect = "failure"
 stdout_regex = "outside grid|inside the supergrid"
-xfail = "readRuptureHDF5 prints 'ERROR: Source positioned outside grid!' and then drops the point and carries on: the run exits 0 with part of the rupture missing."
 
 [[run]]
 name = "refinement-too-thin"
@@ -62,14 +61,30 @@ name = "srf-missing-sr1"
 params = { srf_drop = "SR1" }
 expect = "failure"
 stdout_regex = "SR1"
-xfail = "readRuptureHDF5 prints 'no SR1 dataset found' and returns: the run carries on with no source and exits 0."
 
 [[run]]
 name = "srf-missing-points"
 params = { srf_drop = "POINTS" }
 expect = "failure"
 stdout_regex = "POINTS"
-xfail = "readRuptureHDF5 prints 'no POINTS dataset found' and returns: the run carries on with no source and exits 0."
+
+[[run]]
+name = "srf-missing-file"
+params = { source = "rupturehdf5 file=nope.srf.h5" }
+expect = "failure"
+stdout_regex = "nope.srf.h5.*not found"
+
+[[run]]
+name = "srf-ascii-outside-domain"
+params = { src_de = 9000.0, source = "rupture file=src.srf" }
+expect = "failure"
+stdout_regex = "outside grid"
+
+[[run]]
+name = "srf-outside-domain-skip"
+params = { src_de = 9000.0, source = "rupturehdf5 file=src.srf.h5 outside=skip" }
+expect = "success"
+stdout_regex = "dropped 1 rupture points positioned outside grid"
 
 [[run]]
 name = "sfile-too-small"
