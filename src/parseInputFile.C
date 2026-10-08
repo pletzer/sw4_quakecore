@@ -2362,7 +2362,10 @@ void EW::processTestEnergy(char* buffer)
   string filename("energy.log");
 
   float_sw4 cpcsratio = sqrt(3.0);
-  
+  float_sw4 basementz = 1e38, basementvfact = 2.7, basementrhofact = 1.28;
+  float_sw4 rhobase = 2.0, mubase = 2.0, rhoamp = -1, muamp = -1;
+  float_sw4 qsbase = 20.0, qpbase = -1.0, qsamp = 20.0, qpamp = 0.0;
+
   while (token != NULL)
   {
     if (startswith("#", token) || startswith(" ", buffer))
@@ -2370,8 +2373,63 @@ void EW::processTestEnergy(char* buffer)
 
     if (startswith("cpcsratio=", token))
     {
-      token += 10; 
+      token += 10;
       cpcsratio = atof(token);
+    }
+    else if (startswith("rhobase=", token))
+    {
+      token += 8;
+      rhobase = atof(token);
+    }
+    else if (startswith("mubase=", token))
+    {
+      token += 7;
+      mubase = atof(token);
+    }
+    else if (startswith("rhoamp=", token))
+    {
+      token += 7;
+      rhoamp = atof(token);
+    }
+    else if (startswith("muamp=", token))
+    {
+      token += 6;
+      muamp = atof(token);
+    }
+    else if (startswith("qsbase=", token))
+    {
+      token += 7;
+      qsbase = atof(token);
+    }
+    else if (startswith("qpbase=", token))
+    {
+      token += 7;
+      qpbase = atof(token);
+    }
+    else if (startswith("qsamp=", token))
+    {
+      token += 6;
+      qsamp = atof(token);
+    }
+    else if (startswith("qpamp=", token))
+    {
+      token += 6;
+      qpamp = atof(token);
+    }
+    else if (startswith("basementz=", token))
+    {
+      token += 10;
+      basementz = atof(token);
+    }
+    else if (startswith("basementvfact=", token))
+    {
+      token += 14;
+      basementvfact = atof(token);
+    }
+    else if (startswith("basementrhofact=", token))
+    {
+      token += 16;
+      basementrhofact = atof(token);
     }
     else if (startswith("seed=", token))
     {
@@ -2415,6 +2473,17 @@ void EW::processTestEnergy(char* buffer)
     token = strtok(NULL, " \t");
   }
   m_energy_test = new TestEnergy( seed, cpcsratio, write_every, filename, stochastic_amp, sg_eps );
+  m_energy_test->m_basement_z = basementz;
+  m_energy_test->m_basement_vfact = basementvfact;
+  m_energy_test->m_basement_rhofact = basementrhofact;
+  m_energy_test->m_rhobase = rhobase;
+  m_energy_test->m_mubase = mubase;
+  m_energy_test->m_rhoamp = rhoamp >= 0 ? rhoamp : stochastic_amp;
+  m_energy_test->m_muamp = muamp >= 0 ? muamp : stochastic_amp;
+  m_energy_test->m_qsbase = qsbase;
+  m_energy_test->m_qpbase = qpbase;
+  m_energy_test->m_qsamp = qsamp;
+  m_energy_test->m_qpamp = qpamp;
   // default bc is periodic in the horizontal directions
   boundaryConditionType bct[6]={bPeriodic, bPeriodic, bPeriodic, bPeriodic, bStressFree, bDirichlet};
 
@@ -4177,7 +4246,7 @@ void EW::processCheckPoint(char* buffer)
       m_check_point->set_checkpoint_file( filePrefix, cycle, cycleInterval, bufsize, useHDF5, compressionMode, compressionPar );
    if( restartFileGiven )
    {
-      m_check_point->set_restart_file( restartFileName, bufsize );
+      m_check_point->set_restart_file( restartFileName, bufsize, useHDF5 );
    }
    if( restartPathGiven )
    {
