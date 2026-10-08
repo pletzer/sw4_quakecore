@@ -88,6 +88,35 @@ def write_layered_sfile(path: Path, grid: mininz.Grid, L: float, Z: float, h: fl
             top = lay["bottom"]
 
 
+def _grid_moment_tensor(grid: mininz.Grid, lon: float, lat: float, stk: float, dip: float, rake: float) -> dict:
+    """Unit moment tensor of a true-north strike/dip/rake in SW4's grid frame.
+
+    The strike is converted to the grid with pyproj alone: true north at
+    (lon, lat) has the grid direction (cos b, -sin b), b = atan2(-y_n, x_n),
+    so the strike from the grid x-axis is stk - b (b = az + the projection's
+    meridian convergence). Components follow Aki & Richards with x, y, z =
+    grid x, grid y, down, as SW4's `source mxx=...` expects. Returned as
+    gmxx..gmyz (strings; SW4 multiplies by m0), plus stk_grid and conv (b - az) in degrees.
+    """
+    x0, y0 = grid.to_xy(lon, lat)
+    xn, yn = grid.to_xy(lon, lat + 1e-4)
+    b = math.degrees(math.atan2(-(float(yn) - float(y0)), float(xn) - float(x0)))
+    s_grid = stk - b
+    S, D, R = (math.radians(v) for v in (s_grid, dip, rake))
+    mxx = -(math.sin(D) * math.cos(R) * math.sin(2 * S) + math.sin(2 * D) * math.sin(R) * math.sin(S) ** 2)
+    myy = math.sin(D) * math.cos(R) * math.sin(2 * S) - math.sin(2 * D) * math.sin(R) * math.cos(S) ** 2
+    mxy = math.sin(D) * math.cos(R) * math.cos(2 * S) + 0.5 * math.sin(2 * D) * math.sin(R) * math.sin(2 * S)
+    mxz = -(math.cos(D) * math.cos(R) * math.cos(S) + math.cos(2 * D) * math.sin(R) * math.sin(S))
+    myz = -(math.cos(D) * math.cos(R) * math.sin(S) - math.cos(2 * D) * math.sin(R) * math.cos(S))
+    conv = (b - grid.az + 180.0) % 360.0 - 180.0
+    # 10 significant digits as strings: SW4 reads input lines into a 256-char
+    # buffer and hangs on longer lines, and full float reprs overflow it.
+    g = {"gmxx": mxx, "gmyy": myy, "gmzz": -(mxx + myy), "gmxy": mxy, "gmxz": mxz, "gmyz": myz}
+    out = {k: f"{v:.10g}" for k, v in g.items()}
+    out.update({"stk_grid": s_grid, "conv": conv})
+    return out
+
+
 def build(run_dir: Path, params: dict) -> dict:
     grid, lon0, lat0 = _frame(params)
     out: dict = {"lon0": lon0, "lat0": lat0}
@@ -113,6 +142,7 @@ def build(run_dir: Path, params: dict) -> dict:
         "m0": mu * area * 1e-4 * slip * 1e-2, "src_t0": t0, "src_freq": 1.0 / sigma,
         "stk": pt.stk, "dip": pt.dip, "rake": pt.rake,
     })
+    out.update(_grid_moment_tensor(grid, float(slon), float(slat), pt.stk, pt.dip, pt.rake))
     # Stations: (name, de, dn) offsets from the centre, metres.
     stations = params.get("stations", [["N", 0, 3000], ["E", 3000, 0], ["S", 0, -3000], ["W", -3000, 0],
                                        ["NE", 2000, 2000]])

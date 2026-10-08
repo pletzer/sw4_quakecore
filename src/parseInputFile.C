@@ -6043,7 +6043,14 @@ void EW::processSource(char* buffer, vector<vector<Source*> > & a_GlobalUniqueSo
     {
       float_sw4 radconv = M_PI / 180.;
       float_sw4 S, D, R;
-      strike -= mGeoAz; // subtract off the grid azimuth
+      // strike= is a bearing from TRUE north (as SRF STK). The grid x-axis
+      // points at true azimuth mGeoAz + gamma, gamma = meridian convergence
+      // at the source (EW::computeMeridianConvergence), whether the source is
+      // positioned by lat/lon or by x/y.
+      double slon = lon, slat = lat;
+      if (!geoCoordSet)
+        computeGeographicCoord(x, y, slon, slat);
+      strike -= mGeoAz + computeMeridianConvergence(slon, slat);
       S = strike*radconv; D = dip*radconv; R = rake*radconv;
       
       mxx = -1.0 * ( sin(D) * cos(R) * sin (2*S) + sin(2*D) * sin(R) * sin(S)*sin(S) );
@@ -6491,7 +6498,9 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
 // convert strike, dip, rake to Mij
 	float_sw4 radconv = M_PI / 180.;
 	float_sw4 S, D, R;
-	stk -= mGeoAz; // subtract off the grid azimuth
+	// SRF STK is a bearing from TRUE north; the grid x-axis points at true
+	// azimuth mGeoAz + gamma (gamma = meridian convergence at the subfault).
+	stk -= mGeoAz + computeMeridianConvergence(lon, lat);
 	S = stk*radconv; D = dip*radconv; R = rake*radconv;
       
 	mxx = -1.0 * ( sin(D) * cos(R) * sin (2*S) + sin(2*D) * sin(R) * sin(S)*sin(S) );

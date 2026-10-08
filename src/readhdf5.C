@@ -1157,7 +1157,9 @@ void readRuptureHDF5(char *fname, vector<vector<Source*> > & a_GlobalUniqueSourc
   // convert strike, dip, rake to Mij
       float_sw4 radconv = M_PI / 180.;
       float_sw4 S, D, R;
-      stk -= mGeoAz; // subtract off the grid azimuth
+      // SRF STK is a bearing from TRUE north; the grid x-axis points at true
+      // azimuth mGeoAz + gamma (gamma = meridian convergence at the subfault).
+      stk -= mGeoAz + ew->computeMeridianConvergence(lon, lat);
       S = stk*radconv; D = dip*radconv; R = rake*radconv;
     
       mxx = -1.0 * ( sin(D) * cos(R) * sin (2*S) + sin(2*D) * sin(R) * sin(S)*sin(S) );
