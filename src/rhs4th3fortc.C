@@ -1,5 +1,10 @@
 #include "sw4.h"
 #include <cstdlib>
+#include <unistd.h>
+#if defined(__APPLE__)
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#endif
 #include <cmath>
 
 #ifdef _OPENMP
@@ -37,6 +42,65 @@
 // to the next; when nj < nthreads the loop is too thin for any of this to
 // matter. Numerically inert: this moves iterations between threads, changes
 // no arithmetic, and these loops carry no reductions.
+// j-tiles of the interior loops of the Cartesian RHS kernels. Each thread takes whole tiles and
+// sweeps k inside each, so that the planes k-2..k+2 of mu, la and u (5 arrays x 5 planes) for
+// one tile stay in L2 while k advances. Without tiling a thread swept k over its whole share
+// of the j-lines, e.g. ~150 lines and ~4.6 MB on lamb-3 (305 points per line, single precision,
+// 2 threads), which does not fit in Genoa's 1 MB L2. On lamb-3 (AVX-512 icpc build) 16-line
+// tiles made the stretched kernel 15-16% faster (tools/bench_rhs4) and the whole run 6.7%.
+//
+// Width: the lines whose 5 x 5 planes fill half of L2 (sysconf on Linux, sysctl on macOS, else
+// 1 MB), at least 4; SW4_RHS_JTILE overrides it.
+static int rhs4_jtile( int ni )
+{
+   static const int env = []{
+      const char* e = getenv("SW4_RHS_JTILE");
+      return e ? atoi(e) : 0;
+   }();
+   if( env > 0 )
+      return env;
+   static const long l2 = []{
+      long v = 0;
+#if defined(_SC_LEVEL2_CACHE_SIZE)
+      v = sysconf(_SC_LEVEL2_CACHE_SIZE);                // glibc
+#elif defined(__APPLE__)
+      int64_t s = 0;                                     // macOS
+      size_t len = sizeof(s);
+      if( sysctlbyname("hw.l2cachesize", &s, &len, nullptr, 0) == 0 )
+         v = static_cast<long>(s);
+#endif
+      return v > 0 ? v : 1048576L;                       // unknown: 1 MB
+   }();
+   const long w = (l2/2) / (25L*ni*static_cast<long>(sizeof(float_sw4)));
+   return w < 4 ? 4 : static_cast<int>(w);
+}
+
+// The j-lines jfirst+2..jlast-2 split into tiles of about rhs4_jtile(ni) lines. The number of
+// tiles is a multiple of the thread count and the widths differ by at most one line, so a
+// static schedule gives every thread the same number of lines. When a thread's share is no
+// wider than one tile, each thread gets one tile and the order is the untiled one.
+// Call inside the parallel region.
+struct Rhs4JTiles
+{
+   int jlo, nlines, njt;
+   int j0( int t ) const { return jlo + static_cast<int>( (static_cast<long>(t)*nlines)/njt ); }
+   int j1( int t ) const { return jlo + static_cast<int>( (static_cast<long>(t+1)*nlines)/njt ) - 1; }
+};
+static inline Rhs4JTiles rhs4_jtiles( int jfirst, int jlast, int ni )
+{
+   Rhs4JTiles t;
+   t.jlo = jfirst+2;
+   t.nlines = jlast-2 - t.jlo + 1;
+   int nthr = 1;
+#ifdef _OPENMP
+   nthr = omp_get_num_threads();
+#endif
+   const int jt = rhs4_jtile( ni );
+   const int per_thread = t.nlines > 0 ? (t.nlines + nthr*jt - 1)/(nthr*jt) : 0;
+   t.njt = nthr*per_thread;
+   return t;
+}
+
 static inline int sw4_jblock( int jbeg, int jend )
 {
    int nj = jend - jbeg + 1;
@@ -209,10 +273,15 @@ static void rhs4th3fort_ci_impl( int ifirst, int ilast, int jfirst, int jlast, i
 // bandwidth: the one phase that is a single long parallel loop was flat while
 // bc, which forks 42 times, degraded 6.5-8.0x. Div-stress carries 3 barriers
 // per Cartesian call and 5 per curvilinear call; this removes all but one.
-#pragma omp for collapse(2) schedule(static,jblk) nowait
+   // Interior, tiled in j (see rhs4_jtile). Every point is computed as before; only the
+   // order of the points changes.
+   const Rhs4JTiles tiles = rhs4_jtiles( jfirst, jlast, ni );
+#pragma omp for schedule(static) nowait
+   for( int jt=0 ; jt < tiles.njt ; jt++ )
+   {
+      const int j0 = tiles.j0(jt), j1 = tiles.j1(jt);
    for( k= k1; k <= k2 ; k++ )
-      for( j=jfirst+2; j <= jlast-2 ; j++ )
-//#pragma simd deprecated
+      for( j=j0; j <= j1 ; j++ )
 #pragma omp simd
 	 for( i=ifirst+2; i <= ilast-2 ; i++ )
 	 {
@@ -444,6 +513,7 @@ static void rhs4th3fort_ci_impl( int ifirst, int ilast, int jfirst, int jlast, i
 	    SW4_LU_STORE(2, cof*r2);
 	    SW4_LU_STORE(3, cof*r3);
 	 }
+   }
       if( onesided[4]==1 )
       {
 #pragma omp for collapse(2) schedule(static,jblk) nowait
@@ -1073,10 +1143,15 @@ static void rhs4th3fortsgstr_ci_impl( int ifirst, int ilast, int jfirst, int jla
    // OP=='-' instantiation (attenuation then subtracted L_a(alpha) once per thread).
    if( OP == '=' )
       rhs4_zero_lu_halo( a_lu, ifirst, ilast, jfirst, jlast, kfirst, klast, kw1, kw2 );
-#pragma omp for collapse(2) schedule(static,jblk) nowait
+   // Interior, tiled in j (see rhs4_jtile). Every point is computed as before; only the
+   // order of the points changes.
+   const Rhs4JTiles tiles = rhs4_jtiles( jfirst, jlast, ni );
+#pragma omp for schedule(static) nowait
+   for( int jt=0 ; jt < tiles.njt ; jt++ )
+   {
+      const int j0 = tiles.j0(jt), j1 = tiles.j1(jt);
    for( k= k1; k <= k2 ; k++ )
-      for( j=jfirst+2; j <= jlast-2 ; j++ )
-	 //#pragma simd
+      for( j=j0; j <= j1 ; j++ )
 #pragma omp simd
 	 for( i=ifirst+2; i <= ilast-2 ; i++ )
 	 {
@@ -1308,6 +1383,7 @@ static void rhs4th3fortsgstr_ci_impl( int ifirst, int ilast, int jfirst, int jla
 	    SW4_LU_STORE(2, cof*r2);
 	    SW4_LU_STORE(3, cof*r3);
 	 }
+   }
       if( onesided[4]==1 )
       {
 #pragma omp for collapse(2) schedule(static,jblk) nowait
