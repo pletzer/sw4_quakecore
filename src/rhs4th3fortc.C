@@ -1,6 +1,10 @@
 #include "sw4.h"
 #include <cstdlib>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#endif
 #include <cmath>
 
 #ifdef _OPENMP
@@ -45,7 +49,8 @@
 // 2 threads), which does not fit in Genoa's 1 MB L2. On lamb-3 (AVX-512 icpc build) 16-line
 // tiles made the stretched kernel 15-16% faster (tools/bench_rhs4) and the whole run 6.7%.
 //
-// Width: the lines whose 5 x 5 planes fill half of L2, at least 4; SW4_RHS_JTILE overrides it.
+// Width: the lines whose 5 x 5 planes fill half of L2 (sysconf on Linux, sysctl on macOS, else
+// 1 MB), at least 4; SW4_RHS_JTILE overrides it.
 static int rhs4_jtile( int ni )
 {
    static const int env = []{
@@ -55,8 +60,16 @@ static int rhs4_jtile( int ni )
    if( env > 0 )
       return env;
    static const long l2 = []{
-      long v = sysconf(_SC_LEVEL2_CACHE_SIZE);
-      return v > 0 ? v : 1048576L;
+      long v = 0;
+#if defined(_SC_LEVEL2_CACHE_SIZE)
+      v = sysconf(_SC_LEVEL2_CACHE_SIZE);                // glibc
+#elif defined(__APPLE__)
+      int64_t s = 0;                                     // macOS
+      size_t len = sizeof(s);
+      if( sysctlbyname("hw.l2cachesize", &s, &len, nullptr, 0) == 0 )
+         v = static_cast<long>(s);
+#endif
+      return v > 0 ? v : 1048576L;                       // unknown: 1 MB
    }();
    const long w = (l2/2) / (25L*ni*static_cast<long>(sizeof(float_sw4)));
    return w < 4 ? 4 : static_cast<int>(w);
