@@ -4246,7 +4246,7 @@ void EW::processCheckPoint(char* buffer)
       m_check_point->set_checkpoint_file( filePrefix, cycle, cycleInterval, bufsize, useHDF5, compressionMode, compressionPar );
    if( restartFileGiven )
    {
-      m_check_point->set_restart_file( restartFileName, bufsize );
+      m_check_point->set_restart_file( restartFileName, bufsize, useHDF5 );
    }
    if( restartPathGiven )
    {
