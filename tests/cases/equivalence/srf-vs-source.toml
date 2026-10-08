@@ -26,7 +26,6 @@ name = "srf-hdf5"
 [[run]]
 name = "srf-ascii"
 params = { source = "rupture file=src.srf" }
-xfail = { float = "processRupture reads SR1 values with sscanf(\"%lg\") into float_sw4 (parseInputFile.C:6414): in float builds the slip rates are garbage and the run NaNs at step 1." }
 
 [[run]]
 name = "moment-tensor"
@@ -40,7 +39,6 @@ params = { source = "source lat={{src_lat}} lon={{src_lon}} depth={{src_dep}} m0
 name = "srf-hdf5-vs-ascii"
 kind = "traces_agree"
 runs = ["srf-hdf5", "srf-ascii"]
-xfail = { float = "ASCII SRF is unreadable in float builds (see run srf-ascii)." }
 rtol = { double = 1e-6, float = 1e-4 }
 
 [[check]]

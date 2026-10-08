@@ -5836,17 +5836,25 @@ void EW::processSource(char* buffer, vector<vector<Source*> > & a_GlobalUniqueSo
      //         ....
      FILE* fd=fopen(dfile, "r" );
      CHECK_INPUT( fd !=NULL , err << "Source time function file " << dfile << " not found" );
-     float_sw4 t0, dt;
+     // "%lg" fills a double: read into double temporaries, float_sw4 may be float.
+     double t0d, dt;
      int npts;
-     // TODO: "%lg" always fills a double, but t0/dt and par[] are float_sw4 (4 bytes in single precision) -- read into double temporaries/array and assign.
-     ret = fscanf(fd," %lg %lg %i", &t0, &dt, &npts );
+     ret = fscanf(fd," %lg %lg %i", &t0d, &dt, &npts );
+     CHECK_INPUT( ret == 3 && npts > 0 && dt > 0,
+                  err << "Source time function file " << dfile << ": could not read 't0 dt npts' header" );
      par = new float_sw4[npts+1];
-     par[0]  = t0;
+     par[0]  = t0d;
      freq    = 1/dt;
      ipar    = new int[1];
      ipar[0] = npts;
      for( int i=0 ; i < npts ; i++ )
-	ret = fscanf(fd,"%lg", &par[i+1] );
+     {
+        double val;
+	ret = fscanf(fd,"%lg", &val );
+        CHECK_INPUT( ret == 1, err << "Source time function file " << dfile << ": expected "
+                     << npts << " values, could only read " << i );
+        par[i+1] = val;
+     }
      npar = npts+1;
      nipar = 1;
      //     cout << "Read disc source: t0=" << t0 << " dt="  << dt << " npts= " << npts << endl;
@@ -6296,7 +6304,7 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
       token = strtok(NULL, " \t");
     }
 
-  float_sw4 rVersion;
+  double rVersion;
 
   const int bufsize=1024;
   char buf[bufsize];
@@ -6399,7 +6407,7 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
 	ipar    = new int[1];
 	ipar[0] = nt1dim+1; // add an extra point 
 	ret = fgets(buf,bufsize,fd);
-	token = strtok(buf, " \t");
+	token = ret ? strtok(buf, " \t\r\n") : NULL;
 //	printf("buf='%s'\n", buf);
 	for( int i=0 ; i < nt1 ; i++ )
 	{
@@ -6407,13 +6415,17 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
 	  if (token == NULL)
 	  {
 	    ret = fgets(buf,bufsize,fd);
-	    token = strtok(buf, " \t");
+	    token = ret ? strtok(buf, " \t\r\n") : NULL;
 	  }
 //	  printf("token='%s'\n", token);
-	  // TODO: "%lg" always fills a double, but par[] is float_sw4 (4 bytes in single precision) -- read into a double temporary and assign.
-	  sscanf(token,"%lg", &par[i+1] );
+	  // "%lg" fills a double: read into a double temporary, float_sw4 may be float.
+	  double sr;
+	  CHECK_INPUT( token != NULL && sscanf(token,"%lg", &sr ) == 1,
+		       err << "file " << rfile << ": point #" << pts+1 << " has NT1=" << nt1
+		       << " but only " << i << " slip-rate values could be read" );
+	  par[i+1] = sr;
 // read next token
-	  token = strtok(NULL, " \t");
+	  token = strtok(NULL, " \t\r\n");
 	}
 // pad with 0
 	if (nt1 < 6)
@@ -6582,7 +6594,7 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
 	if (proc_zero())
 	  printf("WARNING nt2=%i > 0 will be ignored\n", nt2);
 	ret = fgets(buf,bufsize,fd);
-	token = strtok(buf, " \t");
+	token = strtok(buf, " \t\r\n");
 //	printf("buf='%s'\n", buf);
 	for( int i=0 ; i < nt2 ; i++ )
 	{
@@ -6590,12 +6602,13 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
 	  if (token == NULL)
 	  {
 	    ret = fgets(buf,bufsize,fd);
-	    token = strtok(buf, " \t");
+	    token = strtok(buf, " \t\r\n");
 	  }
 //	  printf("token='%s'\n", token);
-	  sscanf(token,"%lg", &dum );
+	  CHECK_INPUT( token != NULL, err << "file " << rfile << ": point #" << pts+1
+		       << " has fewer slip-rate values than NT2/NT3 say" );
 // read next token
-	  token = strtok(NULL, " \t");
+	  token = strtok(NULL, " \t\r\n");
 	}
       } // end if nt2 > 0
 
@@ -6607,7 +6620,7 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
 	if (proc_zero())
 	  printf("WARNING nt3=%i > 0 will be ignored\n", nt3);
 	ret = fgets(buf,bufsize,fd);
-	token = strtok(buf, " \t");
+	token = strtok(buf, " \t\r\n");
 //	printf("buf='%s'\n", buf);
 	for( int i=0 ; i < nt3 ; i++ )
 	{
@@ -6615,12 +6628,13 @@ void EW::processRupture(char* buffer, vector<vector<Source*> > & a_GlobalUniqueS
 	  if (token == NULL)
 	  {
 	    ret = fgets(buf,bufsize,fd);
-	    token = strtok(buf, " \t");
+	    token = strtok(buf, " \t\r\n");
 	  }
 //	  printf("token='%s'\n", token);
-	  sscanf(token,"%lg", &dum );
+	  CHECK_INPUT( token != NULL, err << "file " << rfile << ": point #" << pts+1
+		       << " has fewer slip-rate values than NT2/NT3 say" );
 // read next token
-	  token = strtok(NULL, " \t");
+	  token = strtok(NULL, " \t\r\n");
 	}
       } // end if nt3 > 0
       
