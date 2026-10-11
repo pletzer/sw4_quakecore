@@ -1144,7 +1144,8 @@ alph*alph*alph*alph*alph)*(1.0/3.0+pow(alph-2.0,3.0)/24.0+pow(alph-2.0,2.0)/
 }
 
 //------ filter and fix up any discrete time functions ----------------
-void Source::prepareTimeFunc(bool doFilter, float_sw4 sw4TimeStep, int sw4TimeSamples, Filter* sw4_filter)
+void Source::prepareTimeFunc(bool doFilter, float_sw4 sw4TimeStep, int sw4TimeSamples, Filter* sw4_filter,
+                             float_sw4 tKeepMin, float_sw4 tKeepMax)
 {
 
    if (mTimeDependence == iDiscrete || mTimeDependence == iDiscrete6moments || mTimeDependence == iDiscrete3forces )
@@ -1231,6 +1232,10 @@ void Source::prepareTimeFunc(bool doFilter, float_sw4 sw4TimeStep, int sw4TimeSa
 
    // Build the spline representation
          spline_interpolation();
+// The zero padding needed by the filter makes the spline much longer than the simulated time
+// window (e.g. ~18 s of precursor on each side of a 1 s SRF slip-rate function). Drop the
+// spline intervals that can never be evaluated.
+         trim_spline( tKeepMin, tKeepMax );
          m_is_filtered = true;
 // only do the filtering once
          m_timeFuncIsReady = true;
@@ -1420,6 +1425,10 @@ void Source::set_grid_point_sources4( EW *a_EW, vector<GridPointSource*>& point_
 // k. Furthermore, since this source belongs to this MPI task, it
 // needs to get initialized (filtered), unless it has already been done
 //
+// Time window in which the time function can be evaluated during the simulation. Filtered
+// discrete time functions are trimmed to it (plus a margin), see trim_spline().
+   const float_sw4 tKeepMin = a_EW->getStartTime() - 2*a_EW->getTimeStep();
+   const float_sw4 tKeepMax = a_EW->getStartTime() + (a_EW->getMaxNumberOfTimeSteps()+2)*a_EW->getTimeStep();
    for( int j=jc-2 ; j <= jc+3 ; j++ )
      for( int i=ic-2 ; i <= ic+3 ; i++ )
      {
@@ -1429,7 +1438,7 @@ void Source::set_grid_point_sources4( EW *a_EW, vector<GridPointSource*>& point_
 // (optionally) filter and spline interpolate the time function in
 // this Source object, unless already done before
 	 prepareTimeFunc(a_EW->m_prefilter_sources, a_EW->getTimeStep(), a_EW->getNumberOfTimeSteps(),
-			 a_EW->m_filter_ptr);
+			 a_EW->m_filter_ptr, tKeepMin, tKeepMax);
        }
      }         
 
@@ -1485,7 +1494,7 @@ void Source::set_grid_point_sources4( EW *a_EW, vector<GridPointSource*>& point_
                   {
 // filter the time function in this Source object, unless already done
 		     prepareTimeFunc(a_EW->m_prefilter_sources, a_EW->getTimeStep(),
-				     a_EW->getNumberOfTimeSteps(), a_EW->m_filter_ptr);
+				     a_EW->getNumberOfTimeSteps(), a_EW->m_filter_ptr, tKeepMin, tKeepMax);
                   }
                }
          } // end if k<=1
@@ -1499,7 +1508,7 @@ void Source::set_grid_point_sources4( EW *a_EW, vector<GridPointSource*>& point_
                   {
 // filter the time function in this Source object, unless already done
 		     prepareTimeFunc(a_EW->m_prefilter_sources, a_EW->getTimeStep(),
-				     a_EW->getNumberOfTimeSteps(), a_EW->m_filter_ptr);
+				     a_EW->getNumberOfTimeSteps(), a_EW->m_filter_ptr, tKeepMin, tKeepMax);
                   }
                }
          } // end if k >= Nz
@@ -2709,6 +2718,37 @@ void Source::filter_timefunc( Filter* filter_ptr, float_sw4 tstart, float_sw4 dt
       spline_interpolation();
       m_is_filtered = true;
    }
+}
+
+//-----------------------------------------------------------------------
+void Source::trim_spline( float_sw4 tmin, float_sw4 tmax )
+{
+   // Keep only the spline intervals of an iDiscrete time function that cover [tmin,tmax].
+   // Assumes spline_interpolation() has been called: mPar[0] = tstart = mT0,
+   // mPar[1..6*(npts-1)] = polynomial coefficients, mIpar[0] = npts, mFreq = 1/dt.
+   // Outside the kept window Discrete() clamps to the values at the window ends; callers pass a
+   // window that covers every time the source is evaluated at.
+   if( mTimeDependence != iDiscrete )
+      return;
+   int npts = mIpar[0];
+   float_sw4 tstart = mPar[0];
+   float_sw4 dt = 1/mFreq;
+   int k0 = static_cast<int>(floor((tmin-tstart)*mFreq));
+   int k1 = static_cast<int>(ceil((tmax-tstart)*mFreq));
+   if( k0 < 0 )      k0 = 0;
+   if( k1 > npts-2 ) k1 = npts-2;
+   if( k1 < k0 || (k0 == 0 && k1 == npts-2) )
+      return;
+   int nint = k1-k0+1; // number of kept intervals
+   float_sw4* par = new float_sw4[6*nint+1];
+   par[0] = tstart + k0*dt;
+   for( int i=0 ; i < 6*nint ; i++ )
+      par[i+1] = mPar[6*k0+i+1];
+   delete[] mPar;
+   mPar = par;
+   mNpar = 6*nint+1;
+   mIpar[0] = nint+1;
+   mT0 = par[0];
 }
 
 //-----------------------------------------------------------------------

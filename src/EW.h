@@ -655,6 +655,9 @@ bool usingParallelFS(){ return m_pfs;};
 int getNumberOfWritersPFS(){ return m_nwriters;};
 float_sw4 getTimeStep() const {return mDt;};
 int getNumberOfTimeSteps(int event=0) const {return mNumberOfTimeSteps[event];};
+float_sw4 getStartTime() const {return mTstart;};
+// Largest number of time steps over all events (the time window any source can be evaluated in)
+int getMaxNumberOfTimeSteps() const {int n=0; for(int s : mNumberOfTimeSteps) n = s > n ? s : n; return n;};
 int getNumberOfMechanisms() const {return m_number_mechanisms;};
 
  // test point source

@@ -83,7 +83,8 @@ public:
 
 // keep track of new filtering approach:
    bool m_timeFuncIsReady;
-   void prepareTimeFunc(bool doFilter, float_sw4 sw4TimeStep, int sw4TimeSamples, Filter *sw4_filter);
+   void prepareTimeFunc(bool doFilter, float_sw4 sw4TimeStep, int sw4TimeSamples, Filter *sw4_filter,
+                        float_sw4 tKeepMin, float_sw4 tKeepMax);
 
   float_sw4 getX0() const;
   float_sw4 getY0() const;
@@ -151,6 +152,7 @@ public:
                          std::vector<GridPointSource*>& point_sources );
 
   int spline_interpolation( );
+  void trim_spline( float_sw4 tmin, float_sw4 tmax );
   void getsourcewgh(float_sw4 ai, float_sw4 wgh[6], float_sw4 dwghda[6], float_sw4 ddwghda[6] ) const;
   void getsourcedwgh(float_sw4 ai, float_sw4 wgh[6], float_sw4 dwghda[6], float_sw4 ddwghda[6] ) const;
   void getsourcewghlow(float_sw4 ai, float_sw4 wgh[6], float_sw4 dwghda[6], float_sw4 ddwghda[6] ) const;
