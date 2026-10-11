@@ -114,6 +114,7 @@ int local_to_global_event( int e ) const;
 
 void setupRun( vector<vector<Source*> > & a_GlobalUniqueSources );
 
+int preroll_steps( vector<Source*> & a_Sources, bool save_sides );
 void solve( vector<Source*> & a_GlobalSources, vector<TimeSeries*> & a_GlobalTimeSeries,
 	    vector<Sarray>& a_Mu, vector<Sarray>& a_Lambda, vector<Sarray>& a_Rho,
 	    vector<Sarray>& U, vector<Sarray>& Um,
@@ -156,6 +157,9 @@ void extractRecordData(TimeSeries::receiverMode mode, int i0, int j0, int k0, in
 // some (all?) of these functions are called from parseInputFile() and should be made private
 void badOption(string name, char* option) const;
 bool startswith(const char begin[], char *line);
+// Read one line of any length from an input file into buf (NUL terminated, writable
+// for strtok). Returns false at end of file.
+static bool readInputLine(std::istream& in, std::vector<char>& buf);
 void processGrid(char* buffer);
 void processRefinement(char* buffer);
 void deprecatedOption(const string& command, 
@@ -516,6 +520,19 @@ int computeNearestGridPoint2(int & a_i,
 			     float_sw4 a_x, 
 			     float_sw4 a_y, 
 			     float_sw4 a_z);
+
+// Receivers: the grid node nearest to (a_x,a_y,a_z) in all three directions
+// (computeNearestGridPoint2 returns the low corner in i and j, which sources
+// need as a stencil base). Returns true on the single rank that owns that node
+// as an interior point. Coordinates are double regardless of float_sw4 so that
+// float and double builds pick the same node.
+int computeReceiverGridPoint(int & a_i,
+			     int & a_j,
+			     int & a_k,
+			     int & a_g,
+			     double a_x,
+			     double a_y,
+			     double a_z);
 
 int computeInvGridMap( float_sw4& a_i, float_sw4& a_j, float_sw4& a_k, int& a_g,
                        float_sw4 a_x, float_sw4 a_y, float_sw4 a_z );
@@ -1733,7 +1750,10 @@ bool m_output_load;
 int m_projection_cycle;
 
 bool m_checkfornan;
-bool m_failonnan;   // when set, MPI_Abort as soon as a NaN is detected
+bool m_failonnan;   // when set, MPI_Abort as soon as a NaN or Inf is detected
+// The run is declared diverged, and aborted, once max|U| exceeds this (on the
+// printing cadence, see solve.C). <= 0 disables. Default 1e30, see EW.C.
+float_sw4 m_divergence_limit;
 // 'developer allowsourceinsupergrid=1': downgrade the source-in-the-sponge
 // abort to a warning. The diagnostic is still printed in full.
 bool m_allow_source_in_supergrid;
