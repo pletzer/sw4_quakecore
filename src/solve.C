@@ -1901,7 +1901,7 @@ void EW::update_curvilinear_cartesian_interface( vector<Sarray>& a_U )
 //-----------------Mesh refinement interface condition for 4th order predictor-corrector scheme------------------------
 void EW::enforceIC( vector<Sarray>& a_Up, vector<Sarray> & a_U, vector<Sarray> & a_Um,
                     vector<Sarray*>& a_AlphaVEp, vector<Sarray*>& a_AlphaVE, vector<Sarray*>& a_AlphaVEm, 
-		    float_sw4 time, bool predictor, vector<Sarray> &F, vector<GridPointSource*> point_sources,
+		    float_sw4 time, bool predictor, vector<Sarray> &F, const vector<GridPointSource*>& point_sources,
                     vector<Sarray>& a_Rho, vector<Sarray>& a_Mu, vector<Sarray>& a_Lambda, bool backward )
 {
    float_sw4 dt=mDt;
@@ -2166,7 +2166,7 @@ void EW::check_ic_conditions( int gc, vector<Sarray>& a_U )
 //-----------------------Special case for 2nd order time stepper----------------------------------------------------
 void EW::enforceIC2( vector<Sarray>& a_Up, vector<Sarray> & a_U, vector<Sarray> & a_Um,
                      vector<Sarray*>& a_AlphaVEp,
-                     float_sw4 time, vector<Sarray> &F, vector<GridPointSource*> point_sources,
+                     float_sw4 time, vector<Sarray> &F, const vector<GridPointSource*>& point_sources,
                      vector<Sarray>& a_Rho, vector<Sarray>& a_Mu, vector<Sarray>& a_Lambda )
 {
    bool predictor = false;   // or true???
@@ -2965,7 +2965,7 @@ void EW::gridref_initial_guess( Sarray& u, int g, bool upper )
 void EW::compute_preliminary_corrector( Sarray& a_Up, Sarray& a_U, Sarray& a_Um,
                                         Sarray* a_AlphaVEp, Sarray* a_AlphaVE, Sarray* a_AlphaVEm,
 					Sarray& Utt, Sarray& Unext, int g, int kic, float_sw4 t, 
-					Sarray &Ftt, vector<GridPointSource*> point_sources,
+					Sarray &Ftt, const vector<GridPointSource*>& point_sources,
                                         Sarray& a_Rho, Sarray& a_Mu, Sarray& a_Lambda )
 {
    //
@@ -3129,7 +3129,7 @@ void EW::compute_preliminary_corrector( Sarray& a_Up, Sarray& a_U, Sarray& a_Um,
 //-----------------------------------------------------------------------
 void EW::compute_preliminary_predictor( Sarray& a_Up, Sarray& a_U, Sarray* a_AlphaVEp, Sarray& Unext,
 					int g, int kic, float_sw4 t, Sarray &F, 
-                                        vector<GridPointSource*> point_sources, 
+                                        const vector<GridPointSource*>& point_sources, 
                                         Sarray& a_Rho, Sarray& a_Mu, Sarray& a_Lambda )
 {
    //
