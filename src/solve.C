@@ -1989,6 +1989,7 @@ void EW::enforceIC( vector<Sarray>& a_Up, vector<Sarray> & a_U, vector<Sarray> &
 		  "enforceIC Error: "<<
                   "Number of ghost points must be three or more, not " << m_ghost_points );
 
+      SW4_TIMER_START("setup");
       Sarray Unextf, Unextc, Bf, Bc, Uf_tt, Uc_tt;
       
       int ibf=m_iStart[g+1], ief=m_iEnd[g+1], jbf=m_jStart[g+1], jef=m_jEnd[g+1];
@@ -2020,6 +2021,9 @@ void EW::enforceIC( vector<Sarray>& a_Up, vector<Sarray> & a_U, vector<Sarray> &
 	 dirichlet_hom_ic( a_Up[g], g, kc-1, false );
       }
 
+      SW4_TIMER_STOP("setup");
+
+      SW4_TIMER_START("preliminary");
       if( predictor ) // In the predictor step, (Unextc, Unextf) represent the displacement after the corrector step
       {
 //  REMARK: June 15, 2017: if predictor == true, the memory variable a_alphaVEp holds the predicted
@@ -2056,6 +2060,9 @@ void EW::enforceIC( vector<Sarray>& a_Up, vector<Sarray> & a_U, vector<Sarray> &
 	 }
       }
 
+      SW4_TIMER_STOP("preliminary");
+
+      SW4_TIMER_START("icstresses");
       compute_icstresses2( a_Up[g+1], Bf, kf, mGridSize[g+1], a_Mu[g+1], a_Lambda[g+1],
                            m_sg_str_x[g+1], m_sg_str_y[g+1],m_sbop,'=');
       compute_icstresses2( a_Up[g], Bc, kc, mGridSize[g], a_Mu[g], a_Lambda[g], 
@@ -2079,11 +2086,16 @@ void EW::enforceIC( vector<Sarray>& a_Up, vector<Sarray> & a_U, vector<Sarray> &
          dirichlet_LRstress( Bf, g+1, kf, time+dt, 1 ); 
       }
 
+      SW4_TIMER_STOP("icstresses");
+
+      SW4_TIMER_START("communicate_2d");
       communicate_array_2d( Unextf, g+1, kf );
       communicate_array_2d( Unextc, g, kc );
       communicate_array_2d( Bf, g+1, kf );
       communicate_array_2d( Bc, g, kc );
+      SW4_TIMER_STOP("communicate_2d");
 
+      SW4_TIMER_START("initial_guess");
       // Up to here, interface stresses and displacement (Bc,Bf) and (Unextc, Unextf) were computed with 
       // correct ghost point values in the corners (supergrid layers).
       // In the following iteration, we use centered formulas for interpolation and restriction, all the 
@@ -2103,16 +2115,21 @@ void EW::enforceIC( vector<Sarray>& a_Up, vector<Sarray> & a_U, vector<Sarray> &
       gridref_initial_guess( a_Up[g+1], g+1, false );
       gridref_initial_guess( a_Up[g], g, true );
 
+      SW4_TIMER_STOP("initial_guess");
+
       float_sw4 cof = predictor ? 12 : 1;
       int is_periodic[2] ={0,0};
       if( m_doubly_periodic )
 	 is_periodic[0] = is_periodic[1] = 1;
       
+      SW4_TIMER_START("consintp");
       consintp( a_Up[g+1], Unextf, Bf, a_Mu[g+1], a_Lambda[g+1], a_Rho[g+1], mGridSize[g+1],
 		a_Up[g],   Unextc, Bc, a_Mu[g],   a_Lambda[g],   a_Rho[g],   mGridSize[g], 
 		cof, g, g+1, is_periodic );
+      SW4_TIMER_STOP("consintp");
       //      CHECK_INPUT(false," controlled termination");
 
+      SW4_TIMER_START("restore_bc");
       // Finally, restore the ghost point values on the sides of the domain.
       // Note: these ghost point values might never be used ?
       if( !m_doubly_periodic )
@@ -2121,13 +2138,16 @@ void EW::enforceIC( vector<Sarray>& a_Up, vector<Sarray> & a_U, vector<Sarray> &
          dirichlet_LRic( a_Up[g], g, kc-1, time+dt, 1 );
       }
        
+      SW4_TIMER_STOP("restore_bc");
    } // end for g...
+   SW4_TIMER_START("curvilinear_ic");
    for( int g=mNumberOfCartesianGrids ; g < mNumberOfGrids-1 ; g++ )
    {
      //         m_clInterface[g-mNumberOfCartesianGrids]->impose_ic( a_Up, time+mDt );
       m_cli2[g-mNumberOfCartesianGrids]->impose_ic( a_Up, time+dt, F, a_AlphaVEp );
       //            check_ic_conditions( g, a_Up );
    }
+   SW4_TIMER_STOP("curvilinear_ic");
 } // enforceIC
 
 //-----------------------------------------------------------------------
