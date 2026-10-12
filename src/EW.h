@@ -242,8 +242,8 @@ void initialData(float_sw4 a_t, vector<Sarray> & a_U, vector<Sarray*> & a_AlphaV
 bool exactSol(float_sw4 a_t, vector<Sarray> & a_U, vector<Sarray*> & a_AlphaVE, vector<Source*>& source );
 void exactRhsTwilight(float_sw4 a_t, vector<Sarray> & a_F);
 void exactAccTwilight(float_sw4 a_t, vector<Sarray> & a_Uacc);
-void Force(float_sw4 a_t, vector<Sarray> & a_F, vector<GridPointSource*> point_sources, vector<int> identsources );
-void Force_tt(float_sw4 a_t, vector<Sarray> & a_F, vector<GridPointSource*> point_sources, vector<int> identsources );
+void Force(float_sw4 a_t, vector<Sarray> & a_F, const vector<GridPointSource*>& point_sources, const vector<int>& identsources );
+void Force_tt(float_sw4 a_t, vector<Sarray> & a_F, const vector<GridPointSource*>& point_sources, const vector<int>& identsources );
 void sort_grid_point_sources( vector<GridPointSource*>& point_sources, vector<int>& identsources );
 
 void normOfDifference( vector<Sarray> & a_Uex,  vector<Sarray> & a_U, float_sw4 &diffInf, float_sw4 &diffL2, float_sw4 &xInf,
@@ -1341,11 +1341,11 @@ void velsum_ci( int is, int ie, int js, int je, int ks, int ke,
 
    void enforceIC( std::vector<Sarray> & a_Up, std::vector<Sarray> & a_U, std::vector<Sarray> & a_Um,
                    vector<Sarray*>& a_AlphaVEp, vector<Sarray*>& a_AlphaVE, vector<Sarray*>& a_AlphaVEm,
-                   float_sw4 t, bool predictor, vector<Sarray> &F, std::vector<GridPointSource*> point_sources,
+                   float_sw4 t, bool predictor, vector<Sarray> &F, const std::vector<GridPointSource*>& point_sources,
                    vector<Sarray>& a_Rho, vector<Sarray>& a_Mu, vector<Sarray>& a_Lambda, bool backward=false );
    void enforceIC2( std::vector<Sarray> & a_Up, std::vector<Sarray> & a_U, std::vector<Sarray> & a_Um,
                     vector<Sarray*>& a_AlphaVEp, float_sw4 t, 
-                    vector<Sarray> &F, std::vector<GridPointSource*> point_sources,
+                    vector<Sarray> &F, const std::vector<GridPointSource*>& point_sources,
                     vector<Sarray>& a_Rho, vector<Sarray>& a_Mu, vector<Sarray>& a_Lambda );
 
    void CurviCartIC( int gcart, vector<Sarray> &a_U, vector<Sarray>& a_Rho, vector<Sarray>& a_Mu, 
@@ -1363,7 +1363,7 @@ void velsum_ci( int is, int ie, int js, int je, int ks, int ke,
                                        Sarray* a_AlphaVEp, Sarray* a_AlphaVE, Sarray* a_AlphaVEm, 
                                        Sarray& Utt, Sarray& Unext,
                                        int g, int kic, float_sw4 t, Sarray &Ftt, 
-                                       std::vector<GridPointSource*> point_sources, 
+                                       const std::vector<GridPointSource*>& point_sources, 
                                        Sarray& a_Rho, Sarray& a_Mu, Sarray& a_Lambda );
 
    // void compute_preliminary_corrector( Sarray& a_Up, Sarray& a_U, Sarray& a_Um,
@@ -1372,7 +1372,7 @@ void velsum_ci( int is, int ie, int js, int je, int ks, int ke,
 
    void compute_preliminary_predictor( Sarray& a_Up, Sarray& a_U, Sarray* a_AlphaVEp, Sarray& Unext,
                                        int g, int kic, float_sw4 t, Sarray &F, 
-                                       vector<GridPointSource*> point_sources,
+                                       const vector<GridPointSource*>& point_sources,
                                        Sarray& a_Rho, Sarray& a_Mu, Sarray& a_Lambda );
    
    void compute_icstresses( Sarray& a_Up, Sarray& B, int g, int kic, float_sw4* a_str_x, float_sw4* a_str_y, 
@@ -1402,7 +1402,7 @@ void velsum_ci( int is, int ie, int js, int je, int ks, int ke,
    void initial_tw_test( vector<Sarray>& U, vector<Sarray>& Up, vector<Sarray>& F,
 			 vector<Sarray>& Mu, vector<Sarray>& Lambda, vector<Sarray>& Lu,
 			 vector<Sarray>& Uacc, vector<Sarray*> AlphaVE,
-			 vector<GridPointSource*> point_sources, vector<int> identsources,
+			 const vector<GridPointSource*>& point_sources, const vector<int>& identsources,
 			 float_sw4 t );
    void checkpoint_twilight_test( vector<Sarray>& Um, vector<Sarray>& U, vector<Sarray>& Up,
 				  vector<Sarray*> AlphaVEm, vector<Sarray*> AlphaVE,
