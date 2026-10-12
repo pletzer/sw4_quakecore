@@ -334,5 +334,6 @@ endif()
 # tests/harness (see tests/README.md). Select with labels: `ctest -L pr` runs
 # the pull-request tier, plain `ctest` runs everything (the nightly tier).
 if(BUILD_TESTING)
+  include(cmake/UnitTests.cmake)
   add_subdirectory(tests)
 endif()
