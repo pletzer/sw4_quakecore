@@ -22,6 +22,14 @@
 // every SW4_TIME* macro to nothing.
 //
 // Set SW4_TIMERS_CSV=<file> in the environment to also write the table as CSV.
+//
+// MPI cost: sw4mpiprof.C intercepts the point-to-point and collective calls SW4
+// uses through the standard PMPI profiling interface and charges each call's
+// time, payload bytes and message count to the innermost running region. The
+// report then adds a second table (MPI time/bytes/messages per region,
+// inclusive of sub-regions) and a third (per MPI function). Configure with
+// -DSW4_TIMERS_MPI=OFF (CMake) or define SW4_NO_MPI_TIMERS to leave the MPI
+// calls alone, e.g. when another PMPI tool (mpiP, TAU, ...) is in use.
 #ifndef SW4_TIMER_H
 #define SW4_TIMER_H
 
@@ -34,6 +42,13 @@ namespace sw4timer
    void stop( const char* name );
    void report( MPI_Comm comm, std::ostream& os );
    void reset();
+
+   // Called by the PMPI wrappers in sw4mpiprof.C.
+   enum MpiFn { MPIFN_SENDRECV, MPIFN_SEND, MPIFN_RECV, MPIFN_ISEND, MPIFN_IRECV,
+                MPIFN_WAIT, MPIFN_WAITALL, MPIFN_BARRIER, MPIFN_BCAST, MPIFN_REDUCE,
+                MPIFN_ALLREDUCE, MPIFN_GATHER, MPIFN_GATHERV, MPIFN_ALLGATHER,
+                MPIFN_ALLGATHERV, MPIFN_COUNT };
+   void add_mpi( int fn, double seconds, double bytes, int messages );
 
    class Scope
    {

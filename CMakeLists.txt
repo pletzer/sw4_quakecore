@@ -188,7 +188,7 @@ set(SW4_SRC_C_FILES src/EW.C src/Sarray.C src/version.C src/parseInputFile.C
     src/MaterialVolimagefile.C src/MaterialRfile.C src/MaterialSfile.C src/AnisotropicMaterialBlock.C
     src/sacutils.C src/DataPatches.C src/addmemvarforcing2.C src/consintp.C src/oddIoddJinterp.C
     src/evenIoddJinterp.C src/oddIevenJinterp.C src/evenIevenJinterp.C src/CheckPoint.C src/geodyn.C
-    src/AllDims.C src/Patch.C src/RandomizedMaterial.C src/MaterialInvtest.C src/sw4-prof.C src/sw4timer.C
+    src/AllDims.C src/Patch.C src/RandomizedMaterial.C src/MaterialInvtest.C src/sw4-prof.C src/sw4timer.C src/sw4mpiprof.C
     src/sachdf5.C src/readhdf5.C src/TestTwilight.C src/TestPointSource.C src/curvilinear4sgwind.C
     src/TestEcons.C src/GridGenerator.C src/GridGeneratorGeneral.C src/GridGeneratorGaussianHill.C
     src/CurvilinearInterface2.C src/SfileOutput.C src/pseudohess.C src/fastmarching.C src/solveTT.C
@@ -226,8 +226,12 @@ target_compile_definitions(sw4_config INTERFACE
 )
 
 option(SW4_TIMERS "Collect region timers and print a min/avg/max table at the end of the run." ON)
+option(SW4_TIMERS_MPI "Charge MPI time, bytes and messages to the timer regions (PMPI wrappers). Turn off when using another PMPI tool." ON)
 if(NOT SW4_TIMERS)
   target_compile_definitions(sw4_config INTERFACE SW4_NO_TIMERS)
+endif()
+if(NOT SW4_TIMERS_MPI)
+  target_compile_definitions(sw4_config INTERFACE SW4_NO_MPI_TIMERS)
 endif()
 
 if(USE_PROJ AND PROJ_FOUND)
