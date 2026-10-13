@@ -31,6 +31,7 @@
 // # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA 
 
 #include "EW.h"
+#include "sw4timer.h"
 #include "impose_cartesian_bc.h"
 #include "cf_interface.h"
 #include "f_interface.h"
@@ -121,6 +122,7 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 		int event, int nsteps_in_memory, int varcase, vector<Sarray>& PseudoHessian )
 {
    // Experimental
+   SW4_TIMER_START("init");
   //   int nsteps_in_memory=50;
 // solution arrays
    vector<Sarray> F, Lu, Uacc, Up;
@@ -677,6 +679,9 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
   double time_start_record = time_start_solve;
   print_execution_time( time_start_init, time_start_solve, "initial data phase" );
 
+  SW4_TIMER_STOP("init");
+  SW4_TIMER_START("time_stepping");
+
 // BEGIN TIME STEPPING LOOP
   if ( !mQuiet && proc_zero() )
     cout << endl << "  Begin time stepping..." << endl;
@@ -716,11 +721,14 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
        //       check_for_nan( AlphaVE, m_number_mechanisms, 1, "alpha");
     }
 
+    SW4_TIMER_START("predictor");
 // evaluate right hand side
+    SW4_TIMER_START("evalRHS");
     if( m_anisotropic )
        evalRHSanisotropic( U, mC, Lu );
     else
        evalRHS( U, a_Mu, a_Lambda, Lu, AlphaVE ); // save Lu in composite grid 'Lu'
+    SW4_TIMER_STOP("evalRHS");
 
     if( m_output_detailed_timing )
        time_measure[1] = MPI_Wtime();
@@ -732,7 +740,9 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
        check_for_nan( Lu, 1, "Lu pred. " );
 
     // take predictor step, store in Up
+    SW4_TIMER_START("evalPredictor");
     evalPredictor( Up, U, Um, a_Rho, Lu, F );    
+    SW4_TIMER_STOP("evalPredictor");
 
     if( m_output_detailed_timing )
        time_measure[2] = MPI_Wtime();
@@ -755,8 +765,10 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
     }
 
 // communicate across processor boundaries
+    SW4_TIMER_START("communicate");
     for(int g=0 ; g < mNumberOfGrids ; g++ )
        communicate_array( Up[g], g );
+    SW4_TIMER_STOP("communicate");
 
     if( m_output_detailed_timing )
        time_measure[3] = MPI_Wtime();
@@ -765,18 +777,23 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
        cout <<" after communicate_array " << endl;
 
 // calculate boundary forcing at time t+mDt
+    SW4_TIMER_START("bc_forcing");
     cartesian_bc_forcing( t+mDt, BCForcing, a_Sources );
+    SW4_TIMER_STOP("bc_forcing");
 
     if( m_output_detailed_timing )
        time_measure[4] = MPI_Wtime();
 
 // NEW (Apr. 3, 2017) PC-time stepping for the memory variable
+    SW4_TIMER_START("memvar");
     if( m_use_attenuation && m_number_mechanisms > 0 )
        updateMemVarPred( AlphaVEp, AlphaVEm, U, t );
+    SW4_TIMER_STOP("memvar");
 
     if( m_output_detailed_timing )
        time_measure[5] = MPI_Wtime();
 
+    SW4_TIMER_START("enforceBC"); // includes geodyn coupling, if any
 // Enforce data on coupling boundary to external solver
     if( m_do_geodynbc )
     {
@@ -808,6 +825,7 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
        enforceBCanisotropic( Up, mC, t+mDt, BCForcing );
     else
        enforceBC( Up, a_Rho, a_Mu, a_Lambda, AlphaVEp, t+mDt, BCForcing );
+    SW4_TIMER_STOP("enforceBC");
 
 
 // NEW
@@ -829,6 +847,7 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 // *** 2nd order in TIME
     if (mOrder == 2)
     {
+       SW4_TIMER_START("supergrid");
 // add super-grid damping terms before enforcing interface conditions
 // (otherwise, Up doesn't have the correct values on the interface)
        if (usingSupergrid())
@@ -840,11 +859,14 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
        {
 	 simpleAttenuation( Up );
        }
+       SW4_TIMER_STOP("supergrid");
        if( m_output_detailed_timing )
           time_measure[7] = MPI_Wtime();
 
 // test: compute forcing for next time step here so it can be used in enforceIC()
+       SW4_TIMER_START("Force");
        Force( t+mDt, F, point_sources, identsources );
+       SW4_TIMER_STOP("Force");
 
        if( m_output_detailed_timing )
           time_measure[8] = MPI_Wtime();
@@ -852,7 +874,9 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 
 // interface conditions for 2nd order in time
 // NOTE: this routine calls preliminary_predictor for t+dt, which needs F(t+dt). It is computed at the top of next time step
+       SW4_TIMER_START("enforceIC");
        enforceIC2( Up, U, Um, AlphaVEp, t, F, point_sources, a_Rho, a_Mu, a_Lambda );
+       SW4_TIMER_STOP("enforceIC");
 
        if( m_output_detailed_timing )
           time_measure[17] = MPI_Wtime();
@@ -863,7 +887,9 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
           time_measure[7] = MPI_Wtime();
 
 // test: precompute F_tt(t)
+       SW4_TIMER_START("Force_tt");
        Force_tt( t, F, point_sources, identsources );
+       SW4_TIMER_STOP("Force_tt");
 
        if( m_output_detailed_timing )
           time_measure[8] = MPI_Wtime();
@@ -872,12 +898,16 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 // *** 4th order in TIME interface conditions for the predictor
 // June 14, 2017: adding AlphaVE & AlphaVEm
 // NOTE: true means call preliminary_corrector, which needs F_tt(t) & is computed 5 lines down
+       SW4_TIMER_START("enforceIC");
        enforceIC( Up, U, Um, AlphaVEp, AlphaVE, AlphaVEm, t, true, F, point_sources,
                   a_Rho, a_Mu, a_Lambda );
+       SW4_TIMER_STOP("enforceIC");
 
        if( m_output_detailed_timing )
           time_measure[9] = MPI_Wtime();
     }
+
+    SW4_TIMER_STOP("predictor");
 
 //
 // corrector step for
@@ -885,9 +915,11 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 //
     if (mOrder == 4)
     {
+       SW4_TIMER_START("corrector");
        // Force_tt( t, F, point_sources, identsources );
 
 
+       SW4_TIMER_START("evalDpDmInTime");
        evalDpDmInTime( Up, U, Um, Uacc ); // store result in Uacc
 
        if( trace && m_myRank == dbgproc )
@@ -896,9 +928,11 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 	  for( int g=0 ; g < mNumberOfGrids ; g++ )
 	     Upred_saved_sides[g]->push( Uacc[g], currentTimeStep );
 
+       SW4_TIMER_STOP("evalDpDmInTime");
        if( m_checkfornan )
 	  check_for_nan( Uacc, 1, "uacc " );
 
+       SW4_TIMER_START("memvar");
 // July 22,  4th order update for memory variables
        if( m_use_attenuation && m_number_mechanisms > 0 )
          updateMemVarCorr( AlphaVEp, AlphaVEm, Up, U, Um, t );
@@ -908,13 +942,16 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
        if( trace && m_myRank == dbgproc )
 	  cout <<" after evalDpDmInTimeAtt" << endl;
 
+       SW4_TIMER_STOP("memvar");
        if( m_output_detailed_timing )
           time_measure[10] = MPI_Wtime();
 
+       SW4_TIMER_START("evalRHS");
        if( m_anisotropic )
 	  evalRHSanisotropic( Uacc, mC, Lu );
        else
 	  evalRHS( Uacc, a_Mu, a_Lambda, Lu, AlphaVEm );
+       SW4_TIMER_STOP("evalRHS");
 
        if( m_output_detailed_timing )
           time_measure[11] = MPI_Wtime();
@@ -926,11 +963,14 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 	  check_for_nan( Lu, 1, "L(uacc) " );
 
 
+       SW4_TIMER_START("evalCorrector");
        evalCorrector( Up, a_Rho, Lu, F );
+       SW4_TIMER_STOP("evalCorrector");
 
        if( m_output_detailed_timing )
           time_measure[12] = MPI_Wtime();
 
+       SW4_TIMER_START("supergrid");
 // add in super-grid damping terms
        if (usingSupergrid())
        {
@@ -943,6 +983,7 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 	 simpleAttenuation( Up );
        }
 
+       SW4_TIMER_STOP("supergrid");
        if( m_output_detailed_timing )
           time_measure[13] = MPI_Wtime();
 
@@ -954,8 +995,10 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
        }
 
 // communicate across processor boundaries
+       SW4_TIMER_START("communicate");
        for(int g=0 ; g < mNumberOfGrids ; g++ )
 	  communicate_array( Up[g], g );
+       SW4_TIMER_STOP("communicate");
 // Re-evaluate the memory variables with the CORRECTED displacement.
 // updateMemVarCorr above built AlphaVEp from the predictor Up, and the
 // corrector used it. Carrying that alpha forward makes the attenuating
@@ -965,6 +1008,7 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 // for the whole elastic CFL range in a von Neumann analysis.
 // AlphaVEm holds alpha_tt (evalDpDmInTimeAtt); recover alpha^{n-1} in place,
 // update, and restore alpha_tt for the interface conditions in enforceIC.
+       SW4_TIMER_START("memvar_corrected");
        if( m_use_attenuation && m_number_mechanisms > 0 )
        {
           const float_sw4 dt2 = mDt*mDt;
@@ -983,9 +1027,11 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
           evalDpDmInTimeAtt( AlphaVEp, AlphaVE, AlphaVEm );
        }
 
+       SW4_TIMER_STOP("memvar_corrected");
        if( m_output_detailed_timing )
           time_measure[14] = MPI_Wtime();
 
+       SW4_TIMER_START("enforceBC"); // includes boundary forcing and geodyn coupling, if any
        if( m_do_geodynbc )
        {
 	  impose_geodyn_ibcdata( Up, U, t+mDt, BCForcing );
@@ -1012,6 +1058,7 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 	  enforceBCanisotropic( Up, mC, t+mDt, BCForcing );
        else
 	  enforceBC( Up, a_Rho, a_Mu, a_Lambda, AlphaVEp, t+mDt, BCForcing );
+       SW4_TIMER_STOP("enforceBC");
 
 // NEW (Apr. 4, 2017)
 // Impose un-coupled free surface boundary condition with visco-elastic terms for 'Up'
@@ -1027,7 +1074,9 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
           cout <<" before Forcing" << endl;
 
 // test: compute forcing for next time step here so it can be used in enforceIC()
+       SW4_TIMER_START("Force");
        Force( t+mDt, F, point_sources, identsources );
+       SW4_TIMER_STOP("Force");
 
        if( m_output_detailed_timing )
           time_measure[16] = MPI_Wtime();
@@ -1039,8 +1088,10 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 // interface conditions for the corrector
 // June 14, 2017: adding AlphaVE & AlphaVEm
 // NOTE: false means call preliminary_predictor for t+dt, which needs F(t+dt). It is computed at the top of next time step
+       SW4_TIMER_START("enforceIC");
        enforceIC( Up, U, Um, AlphaVEp, AlphaVE, AlphaVEm, t, false, F, point_sources, 
                   a_Rho, a_Mu, a_Lambda );
+       SW4_TIMER_STOP("enforceIC");
 
        if( m_output_detailed_timing )
           time_measure[17] = MPI_Wtime();
@@ -1051,6 +1102,7 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 	  for( int g=0 ; g < mNumberOfGrids ; g++ )
 	     Ucorr_saved_sides[g]->push( Up[g], currentTimeStep );
 
+       SW4_TIMER_STOP("corrector");
     }// end if mOrder == 4
     
     if( m_checkfornan )
@@ -1080,6 +1132,7 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 // Steps <= 0 are the pre-roll (see preroll_steps): no output of any kind.
     const bool preroll = currentTimeStep <= 0;
 
+    SW4_TIMER_START("health_check");
     float_sw4 maxabsU = -1;
     if( !preroll && mPrintInterval > 0 &&
         ( mPrintInterval == 1 || (currentTimeStep % mPrintInterval) == 1 ||
@@ -1128,6 +1181,8 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
        }
     }
 
+    SW4_TIMER_STOP("health_check");
+
     if( preroll )
     {
 // The pre-roll ends at t=mTstart. Set t exactly (no accumulated round-off),
@@ -1147,6 +1202,7 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
        continue;
     }
 
+    SW4_TIMER_START("output");
 // periodically, print time stepping info to stdout
     printTime( currentTimeStep, t, MPI_Wtime()-time_start_record, currentTimeStep == mNumberOfTimeSteps[event],
                std::max(beginCycle,1), mNumberOfTimeSteps[event], maxabsU );
@@ -1157,20 +1213,26 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 //
 // AP: Note to self: Any quantity related to velocities will be lagged by one time step
 //
+    SW4_TIMER_START("images");
     update_images( currentTimeStep, t, Up, U, Um, a_Rho, a_Mu, a_Lambda, a_Sources, currentTimeStep == mNumberOfTimeSteps[event] );
     for( int i3 = 0 ; i3 < mImage3DFiles.size() ; i3++ )
       mImage3DFiles[i3]->update_image( currentTimeStep, t, mDt, Up, a_Rho, a_Mu, a_Lambda, a_Rho, a_Mu, a_Lambda, 
 				       mQp, mQs, mPath[eglobal], mZ ); // mRho, a_Mu, mLambda occur twice because we don't use gradRho etc.
 
+    SW4_TIMER_STOP("images");
+
     // Update the ESSI hdf5 data
+    SW4_TIMER_START("essi");
     double time_essi_tmp=MPI_Wtime();
     gg = mNumberOfGrids-1; // top grid
     for( int i3 = 0 ; i3 < mESSI3DFiles.size() ; i3++ )
       mESSI3DFiles[i3]->update_image( currentTimeStep, t, mDt, Up, mPath[eglobal], mZ[gg] ); // not verified for several cuvilinear grids
     double time_essi=MPI_Wtime()-time_essi_tmp;
+    SW4_TIMER_STOP("essi");
 
 // save the current solution on receiver records (time-derivative require Up and Um for a 2nd order
 // approximation, so do this before cycling the arrays)
+    SW4_TIMER_START("record_timeseries");
     for (int ts=0; ts<a_TimeSeries.size(); ts++)
     {
       if (a_TimeSeries[ts]->myPoint())
@@ -1191,7 +1253,10 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
     }
 
 
+    SW4_TIMER_STOP("record_timeseries");
+
 // Write check point, if requested (timeToWrite returns false if checkpointing is not used)
+    SW4_TIMER_START("checkpoint");
     if( m_check_point->timeToWrite( t, currentTimeStep, mDt ) )
     {
        double time_chkpt=MPI_Wtime();
@@ -1236,11 +1301,15 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
        }
    }
 
+    SW4_TIMER_STOP("checkpoint");
+    SW4_TIMER_STOP("output");
+
 // Energy evaluation, requires all three time levels present, do before cycle arrays.
     if( m_output_detailed_timing )
        time_measure[18] = MPI_Wtime();
 
 // // Energy evaluation, requires all three time levels present, do before cycle arrays.
+    SW4_TIMER_START("post_step"); // energy, pseudo-Hessian, array cycling, test errors
     if( m_energy_test )
        compute_energy( mDt, currentTimeStep == mNumberOfTimeSteps[event], Um, U, Up, currentTimeStep, event );
 
@@ -1266,6 +1335,8 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 // output time, Linf-err, Linf-sol-err
 	fprintf(lf, "%e %15.7e %15.7e %15.7e\n", t, errInf, errL2, solInf);
     }
+
+    SW4_TIMER_STOP("post_step");
 
     if( m_output_detailed_timing )
     {
@@ -1326,6 +1397,8 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
     }
 
   } // end time stepping loop
+  SW4_TIMER_STOP("time_stepping");
+  SW4_TIMER_START("finalize");
 
   if ( !mQuiet && proc_zero() )
     cout << "  Time stepping finished..." << endl;
@@ -1452,6 +1525,7 @@ void EW::solve( vector<Source*> & a_Sources, vector<TimeSeries*> & a_TimeSeries,
 
    MPI_Barrier(m_1d_communicator);
 
+  SW4_TIMER_STOP("finalize");
 } // end EW::solve()
 
 //------------------------------------------------------------------------
@@ -1915,6 +1989,7 @@ void EW::enforceIC( vector<Sarray>& a_Up, vector<Sarray> & a_U, vector<Sarray> &
 		  "enforceIC Error: "<<
                   "Number of ghost points must be three or more, not " << m_ghost_points );
 
+      SW4_TIMER_START("setup");
       Sarray Unextf, Unextc, Bf, Bc, Uf_tt, Uc_tt;
       
       int ibf=m_iStart[g+1], ief=m_iEnd[g+1], jbf=m_jStart[g+1], jef=m_jEnd[g+1];
@@ -1946,6 +2021,9 @@ void EW::enforceIC( vector<Sarray>& a_Up, vector<Sarray> & a_U, vector<Sarray> &
 	 dirichlet_hom_ic( a_Up[g], g, kc-1, false );
       }
 
+      SW4_TIMER_STOP("setup");
+
+      SW4_TIMER_START("preliminary");
       if( predictor ) // In the predictor step, (Unextc, Unextf) represent the displacement after the corrector step
       {
 //  REMARK: June 15, 2017: if predictor == true, the memory variable a_alphaVEp holds the predicted
@@ -1982,6 +2060,9 @@ void EW::enforceIC( vector<Sarray>& a_Up, vector<Sarray> & a_U, vector<Sarray> &
 	 }
       }
 
+      SW4_TIMER_STOP("preliminary");
+
+      SW4_TIMER_START("icstresses");
       compute_icstresses2( a_Up[g+1], Bf, kf, mGridSize[g+1], a_Mu[g+1], a_Lambda[g+1],
                            m_sg_str_x[g+1], m_sg_str_y[g+1],m_sbop,'=');
       compute_icstresses2( a_Up[g], Bc, kc, mGridSize[g], a_Mu[g], a_Lambda[g], 
@@ -2005,11 +2086,16 @@ void EW::enforceIC( vector<Sarray>& a_Up, vector<Sarray> & a_U, vector<Sarray> &
          dirichlet_LRstress( Bf, g+1, kf, time+dt, 1 ); 
       }
 
+      SW4_TIMER_STOP("icstresses");
+
+      SW4_TIMER_START("communicate_2d");
       communicate_array_2d( Unextf, g+1, kf );
       communicate_array_2d( Unextc, g, kc );
       communicate_array_2d( Bf, g+1, kf );
       communicate_array_2d( Bc, g, kc );
+      SW4_TIMER_STOP("communicate_2d");
 
+      SW4_TIMER_START("initial_guess");
       // Up to here, interface stresses and displacement (Bc,Bf) and (Unextc, Unextf) were computed with 
       // correct ghost point values in the corners (supergrid layers).
       // In the following iteration, we use centered formulas for interpolation and restriction, all the 
@@ -2029,16 +2115,21 @@ void EW::enforceIC( vector<Sarray>& a_Up, vector<Sarray> & a_U, vector<Sarray> &
       gridref_initial_guess( a_Up[g+1], g+1, false );
       gridref_initial_guess( a_Up[g], g, true );
 
+      SW4_TIMER_STOP("initial_guess");
+
       float_sw4 cof = predictor ? 12 : 1;
       int is_periodic[2] ={0,0};
       if( m_doubly_periodic )
 	 is_periodic[0] = is_periodic[1] = 1;
       
+      SW4_TIMER_START("consintp");
       consintp( a_Up[g+1], Unextf, Bf, a_Mu[g+1], a_Lambda[g+1], a_Rho[g+1], mGridSize[g+1],
 		a_Up[g],   Unextc, Bc, a_Mu[g],   a_Lambda[g],   a_Rho[g],   mGridSize[g], 
 		cof, g, g+1, is_periodic );
+      SW4_TIMER_STOP("consintp");
       //      CHECK_INPUT(false," controlled termination");
 
+      SW4_TIMER_START("restore_bc");
       // Finally, restore the ghost point values on the sides of the domain.
       // Note: these ghost point values might never be used ?
       if( !m_doubly_periodic )
@@ -2047,13 +2138,16 @@ void EW::enforceIC( vector<Sarray>& a_Up, vector<Sarray> & a_U, vector<Sarray> &
          dirichlet_LRic( a_Up[g], g, kc-1, time+dt, 1 );
       }
        
+      SW4_TIMER_STOP("restore_bc");
    } // end for g...
+   SW4_TIMER_START("curvilinear_ic");
    for( int g=mNumberOfCartesianGrids ; g < mNumberOfGrids-1 ; g++ )
    {
      //         m_clInterface[g-mNumberOfCartesianGrids]->impose_ic( a_Up, time+mDt );
       m_cli2[g-mNumberOfCartesianGrids]->impose_ic( a_Up, time+dt, F, a_AlphaVEp );
       //            check_ic_conditions( g, a_Up );
    }
+   SW4_TIMER_STOP("curvilinear_ic");
 } // enforceIC
 
 //-----------------------------------------------------------------------

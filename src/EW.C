@@ -33,6 +33,7 @@
 #include "mpi.h"
 
 #include "EW.h"
+#include "sw4timer.h"
 #include "GridGenerator.h"
 
 #include <cstdarg>
@@ -5353,6 +5354,7 @@ void EW::evalRHS(vector<Sarray> &a_U, vector<Sarray> &a_Mu,
 
   int g, nz;
 
+  SW4_TIMER_START("cartesian");
   for (g = 0; g < mNumberOfCartesianGrids; g++) {
     // No set_to_zero() here. The op=='=' path in rhs4th3fort_ci /
     // rhs4th3fortsgstr_ci memsets the output array itself, and Lu/Uacc are
@@ -5443,7 +5445,9 @@ void EW::evalRHS(vector<Sarray> &a_U, vector<Sarray> &a_Mu,
       //       cout << "Second application of LU " << nn << " nans" << endl;
     }
   } // end for g... (Cartesian)
+  SW4_TIMER_STOP("cartesian");
 
+  SW4_TIMER_START("curvilinear");
   //  if( topographyExists() )
   for (g = mNumberOfCartesianGrids; g < mNumberOfGrids; g++) {
     // No set_to_zero() here, matching the Cartesian loop above. The OP=='='
@@ -5514,6 +5518,7 @@ void EW::evalRHS(vector<Sarray> &a_U, vector<Sarray> &a_Mu,
       }
     }
   }
+  SW4_TIMER_STOP("curvilinear");
 }
 
 //-----------------------------------------------------------------------

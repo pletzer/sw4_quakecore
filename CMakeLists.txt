@@ -188,7 +188,7 @@ set(SW4_SRC_C_FILES src/EW.C src/Sarray.C src/version.C src/parseInputFile.C
     src/MaterialVolimagefile.C src/MaterialRfile.C src/MaterialSfile.C src/AnisotropicMaterialBlock.C
     src/sacutils.C src/DataPatches.C src/addmemvarforcing2.C src/consintp.C src/oddIoddJinterp.C
     src/evenIoddJinterp.C src/oddIevenJinterp.C src/evenIevenJinterp.C src/CheckPoint.C src/geodyn.C
-    src/AllDims.C src/Patch.C src/RandomizedMaterial.C src/MaterialInvtest.C src/sw4-prof.C
+    src/AllDims.C src/Patch.C src/RandomizedMaterial.C src/MaterialInvtest.C src/sw4-prof.C src/sw4timer.C src/sw4mpiprof.C src/sw4ompt.C
     src/sachdf5.C src/readhdf5.C src/TestTwilight.C src/TestPointSource.C src/curvilinear4sgwind.C
     src/TestEcons.C src/GridGenerator.C src/GridGeneratorGeneral.C src/GridGeneratorGaussianHill.C
     src/CurvilinearInterface2.C src/SfileOutput.C src/pseudohess.C src/fastmarching.C src/solveTT.C
@@ -224,6 +224,34 @@ target_compile_definitions(sw4_config INTERFACE
     EW_WHEN="${CURDATETIME}"
     CMAKE_FC_FUNC=1
 )
+
+option(SW4_TIMERS "Collect region timers and print a min/avg/max table at the end of the run." ON)
+option(SW4_TIMERS_MPI "Charge MPI time, bytes and messages to the timer regions (PMPI wrappers). Turn off when using another PMPI tool." ON)
+if(NOT SW4_TIMERS)
+  target_compile_definitions(sw4_config INTERFACE SW4_NO_TIMERS)
+endif()
+if(NOT SW4_TIMERS_MPI)
+  target_compile_definitions(sw4_config INTERFACE SW4_NO_MPI_TIMERS)
+endif()
+
+# OpenMP thread timing through the OMPT tools interface. Needs omp-tools.h and
+# an OMPT-capable runtime (LLVM libomp, Intel libiomp5); GCC's libgomp has
+# neither, and the report then simply omits the OpenMP table.
+option(SW4_TIMERS_OMPT "Charge OpenMP parallel time and thread imbalance to the timer regions (OMPT)." ON)
+set(SW4_HAVE_OMPT OFF)
+if(SW4_TIMERS AND SW4_TIMERS_OMPT)
+  include(CheckIncludeFileCXX)
+  set(CMAKE_REQUIRED_FLAGS "${OpenMP_CXX_FLAGS}")
+  set(CMAKE_REQUIRED_INCLUDES "${OpenMP_CXX_INCLUDE_DIRS}")
+  check_include_file_cxx(omp-tools.h SW4_OMP_TOOLS_H)
+  unset(CMAKE_REQUIRED_FLAGS)
+  unset(CMAKE_REQUIRED_INCLUDES)
+  if(SW4_OMP_TOOLS_H)
+    set(SW4_HAVE_OMPT ON)
+    target_compile_definitions(sw4_config INTERFACE SW4_HAVE_OMPT)
+  endif()
+endif()
+message(STATUS "SW4 region timers: ${SW4_TIMERS}, MPI: ${SW4_TIMERS_MPI}, OpenMP (OMPT): ${SW4_HAVE_OMPT}")
 
 if(USE_PROJ AND PROJ_FOUND)
   target_compile_definitions(sw4_config INTERFACE ENABLE_PROJ)
@@ -308,6 +336,11 @@ target_link_libraries(sw4_common PUBLIC sw4_config)
 
 add_executable(sw4 src/main.C)
 target_link_libraries(sw4 PRIVATE sw4_common)
+if(SW4_HAVE_OMPT)
+  # The OpenMP runtime looks up ompt_start_tool in the global symbol table,
+  # which on Linux only holds the executable's symbols when exported.
+  set_target_properties(sw4 PROPERTIES ENABLE_EXPORTS ON)
+endif()
 
 add_custom_command(TARGET sw4 POST_BUILD COMMAND cat ${CMAKE_SOURCE_DIR}/wave.txt)
 
@@ -322,6 +355,9 @@ endif()
 if(BUILD_SW4MOPT)
   add_executable(sw4mopt ${SW4_SRC_MOPT_FILES})
   target_link_libraries(sw4mopt PRIVATE sw4_common)
+  if(SW4_HAVE_OMPT)
+    set_target_properties(sw4mopt PROPERTIES ENABLE_EXPORTS ON)
+  endif()
 endif()
 
 include(GNUInstallDirs)
