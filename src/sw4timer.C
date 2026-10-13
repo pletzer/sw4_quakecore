@@ -14,6 +14,8 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -47,6 +49,10 @@ struct Node
    double total;
    long calls;
    MpiStat mpi; // exclusive: MPI calls made while this region was innermost
+   double omp_par;     // exclusive: wall time of top-level parallel regions
+   double omp_team;    // their wall time x team size
+   double omp_regions; // their number
+   unsigned omp_threads; // largest team
 };
 
 // Node 0 is the root; it is never timed, but collects the MPI calls made
@@ -60,10 +66,15 @@ struct Registry
    bool started;
    bool warned;
    bool in_report;
+// One entry per OpenMP thread seen by the OMPT tool. Never shrunk: threads
+// keep a pointer to their entry.
+   std::vector<std::unique_ptr<sw4timer::OmpThread>> omp_threads;
+   std::mutex omp_mutex;
+   bool omp_active = false;
    Registry() { clear(); }
    void clear()
    {
-      nodes.assign( 1, Node{ "", -1, {}, 0.0, 0.0, 0, MpiStat() } );
+      nodes.assign( 1, Node{ "", -1, {}, 0.0, 0.0, 0, MpiStat(), 0.0, 0.0, 0.0, 0 } );
       stack.assign( 1, 0 );
       for( auto& f : fn )
          f = MpiStat();
@@ -71,13 +82,17 @@ struct Registry
       started = false;
       warned = false;
       in_report = false;
+      for( auto& t : omp_threads )
+         t->work.clear();
    }
 };
 
+// Never destroyed: OpenMP threads can still report through OMPT callbacks
+// while the runtime shuts down, after static destructors have run.
 Registry& reg()
 {
-   static Registry r;
-   return r;
+   static Registry* r = new Registry();
+   return *r;
 }
 
 bool in_parallel()
@@ -184,7 +199,14 @@ void flatten( const std::vector<UNode>& t, int n, const std::string& prefix,
 }
 
 // Per-region fields reduced over ranks with MIN, MAX and SUM.
-enum Field { F_TIME, F_CALLS, F_PRESENT, F_MPI_T, F_MPI_BYTES, F_MPI_MSGS, F_MPI_CALLS, NF };
+enum Field { F_TIME, F_CALLS, F_PRESENT, F_MPI_T, F_MPI_BYTES, F_MPI_MSGS, F_MPI_CALLS,
+             F_OMP_PAR, F_OMP_REGIONS, F_OMP_THREADS, F_OMP_TEAM, F_OMP_WAIT, F_OMP_IMB, NF };
+
+// OpenMP totals of a region including its sub-regions, for one rank.
+struct OmpStat
+{
+   double par = 0, regions = 0, threads = 0, team = 0, wait = 0, imb = 0;
+};
 
 void reduce3( std::vector<double>& mn, std::vector<double>& mx, std::vector<double>& sm,
               int rank, MPI_Comm comm )
@@ -221,7 +243,7 @@ void start( const char* name )
       }
    if( found < 0 )
    {
-      r.nodes.push_back( Node{ name, cur, {}, 0.0, 0.0, 0, MpiStat() } );
+      r.nodes.push_back( Node{ name, cur, {}, 0.0, 0.0, 0, MpiStat(), 0.0, 0.0, 0.0, 0 } );
       found = static_cast<int>( r.nodes.size() ) - 1;
       r.nodes[cur].children.push_back( found );
    }
@@ -268,6 +290,36 @@ void reset()
    reg().clear();
 }
 
+void omp_set_active()
+{
+   reg().omp_active = true;
+}
+
+int omp_current_region()
+{
+   return reg().stack.back();
+}
+
+void omp_parallel_done( int region, double seconds, unsigned nthreads )
+{
+   Registry& r = reg();
+   if( region < 0 || region >= static_cast<int>( r.nodes.size() ) )
+      return;
+   Node& n = r.nodes[region];
+   n.omp_par += seconds;
+   n.omp_team += seconds * nthreads;
+   n.omp_regions += 1;
+   n.omp_threads = std::max( n.omp_threads, nthreads );
+}
+
+OmpThread* omp_register_thread()
+{
+   Registry& r = reg();
+   std::lock_guard<std::mutex> lock( r.omp_mutex );
+   r.omp_threads.emplace_back( new OmpThread() );
+   return r.omp_threads.back().get();
+}
+
 void report( MPI_Comm comm, std::ostream& os )
 {
    Registry& r = reg();
@@ -286,6 +338,61 @@ void report( MPI_Comm comm, std::ostream& os )
 
    std::vector<MpiStat> incmpi( r.nodes.size() );
    inclusive_mpi( r, 0, incmpi );
+
+// OpenMP per region, inclusive. A child is always created after its parent,
+// so a reverse sweep over node ids accumulates subtrees.
+   const size_t nn = r.nodes.size();
+   std::vector<OmpStat> incomp( nn );
+   {
+      std::vector<double> par( nn ), team( nn ), regions( nn ), threads( nn );
+      for( size_t n = 0; n < nn; n++ )
+      {
+         par[n] = r.nodes[n].omp_par;
+         team[n] = r.nodes[n].omp_team;
+         regions[n] = r.nodes[n].omp_regions;
+         threads[n] = r.nodes[n].omp_threads;
+      }
+      const size_t nt = r.omp_threads.size();
+      std::vector<std::vector<double>> work( nt, std::vector<double>( nn, 0.0 ) );
+      for( size_t t = 0; t < nt; t++ )
+      {
+         const OmpThread& th = *r.omp_threads[t];
+         for( size_t n = 0; n < nn && n < th.work.size(); n++ )
+            work[t][n] = th.work[n];
+      }
+      for( size_t n = nn - 1; n > 0; n-- )
+      {
+         const int p = r.nodes[n].parent;
+         par[p] += par[n];
+         team[p] += team[n];
+         regions[p] += regions[n];
+         threads[p] = std::max( threads[p], threads[n] );
+         for( size_t t = 0; t < nt; t++ )
+            work[t][p] += work[t][n];
+      }
+      for( size_t n = 0; n < nn; n++ )
+      {
+         OmpStat& o = incomp[n];
+         o.par = par[n];
+         o.regions = regions[n];
+         o.threads = threads[n];
+         o.team = team[n];
+// Thread imbalance: busiest thread's work over the mean, among the threads
+// that took part. Waiting is whatever team time was not work.
+         double wmax = 0, wsum = 0;
+         int k = 0;
+         for( size_t t = 0; t < nt; t++ )
+         {
+            if( work[t][n] <= 0 )
+               continue;
+            wmax = std::max( wmax, work[t][n] );
+            wsum += work[t][n];
+            k++;
+         }
+         o.wait = std::max( 0.0, team[n] - wsum );
+         o.imb = ( k > 0 && wsum > 0 ) ? wmax / ( wsum / k ) : 0.0;
+      }
+   }
 
    std::vector<std::string> mypaths;
    std::vector<int> myids;
@@ -336,7 +443,8 @@ void report( MPI_Comm comm, std::ostream& os )
    const int nrows = np + 1 + MPIFN_COUNT;
    const double huge = std::numeric_limits<double>::max();
    std::vector<double> vmin( nrows * NF ), vmax( nrows * NF ), vsum( nrows * NF );
-   auto put = []( std::vector<double>& v, int row, double t, double c, double pr, const MpiStat& m )
+   auto put = []( std::vector<double>& v, int row, double t, double c, double pr, const MpiStat& m,
+                  const OmpStat& om )
    {
       double* f = &v[row * NF];
       f[F_TIME] = t;
@@ -346,6 +454,12 @@ void report( MPI_Comm comm, std::ostream& os )
       f[F_MPI_BYTES] = m.bytes;
       f[F_MPI_MSGS] = m.msgs;
       f[F_MPI_CALLS] = m.calls;
+      f[F_OMP_PAR] = om.par;
+      f[F_OMP_REGIONS] = om.regions;
+      f[F_OMP_THREADS] = om.threads;
+      f[F_OMP_TEAM] = om.team;
+      f[F_OMP_WAIT] = om.wait;
+      f[F_OMP_IMB] = om.imb;
    };
    for( int i = 0; i < np; i++ )
    {
@@ -355,24 +469,31 @@ void report( MPI_Comm comm, std::ostream& os )
          const int id = it->second;
          const double t = r.nodes[id].total + running[id];
          const double c = static_cast<double>( r.nodes[id].calls );
-         put( vmin, i, t, c, 1, incmpi[id] );
-         put( vmax, i, t, c, 1, incmpi[id] );
-         put( vsum, i, t, c, 1, incmpi[id] );
+         put( vmin, i, t, c, 1, incmpi[id], incomp[id] );
+         put( vmax, i, t, c, 1, incmpi[id], incomp[id] );
+         put( vsum, i, t, c, 1, incmpi[id], incomp[id] );
       }
       else
       {
          MpiStat z;
-         put( vmax, i, 0, 0, 0, z );
-         put( vsum, i, 0, 0, 0, z );
+         OmpStat oz;
+         put( vmax, i, 0, 0, 0, z, oz );
+         put( vsum, i, 0, 0, 0, z, oz );
          z.t = z.bytes = z.msgs = z.calls = huge;
-         put( vmin, i, huge, huge, 0, z );
+         oz.par = oz.regions = oz.threads = oz.team = oz.wait = oz.imb = huge;
+         put( vmin, i, huge, huge, 0, z, oz );
       }
    }
    for( auto* v : { &vmin, &vmax, &vsum } )
    {
-      put( *v, np, 0, 0, 1, r.nodes[0].mpi );
+// Root row: work done outside any region (exclusive, not inclusive).
+      OmpStat root;
+      root.par = r.nodes[0].omp_par;
+      root.regions = r.nodes[0].omp_regions;
+      root.threads = r.nodes[0].omp_threads;
+      put( *v, np, 0, 0, 1, r.nodes[0].mpi, root );
       for( int f = 0; f < MPIFN_COUNT; f++ )
-         put( *v, np + 1 + f, 0, 0, 1, r.fn[f] );
+         put( *v, np + 1 + f, 0, 0, 1, r.fn[f], OmpStat() );
    }
    reduce3( vmin, vmax, vsum, rank, comm );
 
@@ -510,6 +631,68 @@ void report( MPI_Comm comm, std::ostream& os )
         << std::setprecision( 1 ) << std::setw( 9 ) << ( wavg > 0 ? 100.0 * tot_t / wavg : 0.0 ) << "\n";
       o << std::string( mline, '-' ) << "\n";
    }
+// OpenMP table, from the OMPT tool.
+   if( r.omp_active )
+   {
+      double regions_all = 0;
+      for( int i = 0; i <= np; i++ )
+         regions_all += vsum[i * NF + F_OMP_REGIONS];
+      if( regions_all > 0 )
+      {
+         const int oline = static_cast<int>( width ) + 81;
+         o << "\n" << std::string( oline, '-' ) << "\n"
+           << "  OpenMP per region, including sub-regions; time in seconds, avg over ranks\n"
+           << "  par.reg = top-level parallel regions per rank, thr = largest team,\n"
+           << "  serial = region time outside parallel regions (includes MPI),\n"
+           << "  wait% = share of the threads' team time not spent working (barrier waits, fork/join overhead),\n"
+           << "  imb = busiest thread's work / mean thread work (avg and max over ranks)\n"
+           << std::string( oline, '-' ) << "\n";
+         o << std::left << std::setw( width ) << "Region" << std::right
+           << std::setw( 10 ) << "par.reg" << std::setw( 5 ) << "thr"
+           << std::setw( 12 ) << "parallel" << std::setw( 8 ) << "%reg"
+           << std::setw( 12 ) << "serial" << std::setw( 8 ) << "wait%"
+           << std::setw( 9 ) << "imb avg" << std::setw( 9 ) << "imb max"
+           << std::setw( 8 ) << "%wall" << "\n";
+         auto omp_row = [&]( const std::string& label, int row, bool have_region_time )
+         {
+            const double par = avg_of( row, F_OMP_PAR );
+            const double reg_t = avg_of( row, F_TIME );
+            const double team = vsum[row * NF + F_OMP_TEAM];
+            o << std::left << std::setw( width ) << label << std::right << std::fixed
+              << std::setprecision( 0 ) << std::setw( 10 ) << avg_of( row, F_OMP_REGIONS )
+              << std::setw( 5 ) << max_of( row, F_OMP_THREADS )
+              << std::setprecision( 4 ) << std::setw( 12 ) << par;
+            if( have_region_time )
+               o << std::setprecision( 1 ) << std::setw( 8 ) << ( reg_t > 0 ? 100.0 * par / reg_t : 0.0 )
+                 << std::setprecision( 4 ) << std::setw( 12 ) << std::max( 0.0, reg_t - par );
+            else
+               o << std::setw( 8 ) << "-" << std::setw( 12 ) << "-";
+            if( team > 0 )
+               o << std::setprecision( 1 ) << std::setw( 8 ) << 100.0 * vsum[row * NF + F_OMP_WAIT] / team
+                 << std::setprecision( 2 ) << std::setw( 9 ) << avg_of( row, F_OMP_IMB )
+                 << std::setw( 9 ) << max_of( row, F_OMP_IMB );
+            else
+               o << std::setw( 8 ) << "-" << std::setw( 9 ) << "-" << std::setw( 9 ) << "-";
+            o << std::setprecision( 1 ) << std::setw( 8 ) << ( wavg > 0 ? 100.0 * par / wavg : 0.0 ) << "\n";
+         };
+         for( int i = 0; i < np; i++ )
+            if( max_of( i, F_OMP_REGIONS ) > 0 )
+               omp_row( labels[i], i, true );
+         if( max_of( np, F_OMP_REGIONS ) > 0 )
+            omp_row( "(outside any region)", np, false );
+         o << std::string( oline, '-' ) << "\n";
+      }
+   }
+#ifdef SW4_HAVE_OMPT
+   else
+      o << "\n  OpenMP table not available: this OpenMP runtime did not start the OMPT tool\n"
+        << "  (GCC's libgomp has no OMPT support; or OMP_TOOL=disabled is set).\n";
+#else
+   else
+      o << "\n  OpenMP table not available: built without OMPT (omp-tools.h not found,\n"
+        << "  e.g. GCC, or SW4_TIMERS_OMPT=OFF).\n";
+#endif
+
    os << o.str() << std::flush;
 
    if( const char* csv = std::getenv( "SW4_TIMERS_CSV" ) )
@@ -518,7 +701,8 @@ void report( MPI_Comm comm, std::ostream& os )
       if( f )
       {
          f << "region,depth,calls_max,calls_total,ranks,min_s,avg_s,max_s,wall_avg_s,"
-              "mpi_min_s,mpi_avg_s,mpi_max_s,mpi_bytes_avg,mpi_msgs_avg,mpi_calls_avg\n";
+              "mpi_min_s,mpi_avg_s,mpi_max_s,mpi_bytes_avg,mpi_msgs_avg,mpi_calls_avg,"
+              "omp_parallel_avg_s,omp_regions_avg,omp_threads_max,omp_wait_frac,omp_imb_avg,omp_imb_max\n";
          f << std::setprecision( 9 );
          auto csv_row = [&]( const std::string& name, int d, int row )
          {
@@ -527,7 +711,11 @@ void report( MPI_Comm comm, std::ostream& os )
               << min_of( row, F_TIME ) << "," << avg_of( row, F_TIME ) << "," << max_of( row, F_TIME ) << ","
               << wavg << "," << min_of( row, F_MPI_T ) << "," << avg_of( row, F_MPI_T ) << ","
               << max_of( row, F_MPI_T ) << "," << avg_of( row, F_MPI_BYTES ) << ","
-              << avg_of( row, F_MPI_MSGS ) << "," << avg_of( row, F_MPI_CALLS ) << "\n";
+              << avg_of( row, F_MPI_MSGS ) << "," << avg_of( row, F_MPI_CALLS ) << ","
+              << avg_of( row, F_OMP_PAR ) << "," << avg_of( row, F_OMP_REGIONS ) << ","
+              << max_of( row, F_OMP_THREADS ) << ","
+              << ( vsum[row * NF + F_OMP_TEAM] > 0 ? vsum[row * NF + F_OMP_WAIT] / vsum[row * NF + F_OMP_TEAM] : 0.0 )
+              << "," << avg_of( row, F_OMP_IMB ) << "," << max_of( row, F_OMP_IMB ) << "\n";
          };
          for( int i = 0; i < np; i++ )
             csv_row( paths[i], depth[i], i );

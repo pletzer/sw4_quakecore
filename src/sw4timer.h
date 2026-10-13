@@ -30,11 +30,22 @@
 // inclusive of sub-regions) and a third (per MPI function). Configure with
 // -DSW4_TIMERS_MPI=OFF (CMake) or define SW4_NO_MPI_TIMERS to leave the MPI
 // calls alone, e.g. when another PMPI tool (mpiP, TAU, ...) is in use.
+//
+// OpenMP cost: sw4ompt.C is an OMPT tool (OpenMP 5.0 tools interface). It
+// charges the time of each top-level parallel region to the running timer
+// region, and records per thread the time spent in the team and waiting at
+// barriers. The report adds a table with, per region, the time in parallel vs
+// serial code, the threads' barrier wait share and the thread load imbalance.
+// OMPT needs an LLVM or Intel OpenMP runtime (clang, AOCC, icx/icc, Cray);
+// GCC's libgomp does not implement it and the table is then omitted. Configure
+// with -DSW4_TIMERS_OMPT=OFF to leave it out; OMP_TOOL=disabled turns it off at
+// run time.
 #ifndef SW4_TIMER_H
 #define SW4_TIMER_H
 
 #include <mpi.h>
 #include <iosfwd>
+#include <vector>
 
 namespace sw4timer
 {
@@ -49,6 +60,19 @@ namespace sw4timer
                 MPIFN_ALLREDUCE, MPIFN_GATHER, MPIFN_GATHERV, MPIFN_ALLGATHER,
                 MPIFN_ALLGATHERV, MPIFN_COUNT };
    void add_mpi( int fn, double seconds, double bytes, int messages );
+
+   // Called by the OMPT tool in sw4ompt.C. Region ids index the timer nodes;
+   // 0 means outside any region. Each OpenMP thread writes only its own
+   // OmpThread, indexed by region id. Team time (wall time x team size) comes
+   // from the master via omp_parallel_done; waiting is team time minus work.
+   struct OmpThread
+   {
+      std::vector<double> work; // busy time in top-level parallel regions, excluding barrier waits
+   };
+   void omp_set_active();
+   int omp_current_region();
+   void omp_parallel_done( int region, double seconds, unsigned nthreads );
+   OmpThread* omp_register_thread();
 
    class Scope
    {
