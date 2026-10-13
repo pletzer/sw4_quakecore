@@ -6,6 +6,8 @@
 #endif
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -89,6 +91,8 @@ struct Registry
 
 // Never destroyed: OpenMP threads can still report through OMPT callbacks
 // while the runtime shuts down, after static destructors have run.
+bool g_failed = false;
+
 Registry& reg()
 {
    static Registry* r = new Registry();
@@ -199,7 +203,7 @@ void flatten( const std::vector<UNode>& t, int n, const std::string& prefix,
 }
 
 // Per-region fields reduced over ranks with MIN, MAX and SUM.
-enum Field { F_TIME, F_CALLS, F_PRESENT, F_MPI_T, F_MPI_BYTES, F_MPI_MSGS, F_MPI_CALLS,
+enum Field : std::uint8_t { F_TIME, F_CALLS, F_PRESENT, F_MPI_T, F_MPI_BYTES, F_MPI_MSGS, F_MPI_CALLS,
              F_OMP_PAR, F_OMP_REGIONS, F_OMP_THREADS, F_OMP_TEAM, F_OMP_WAIT, F_OMP_IMB, NF };
 
 // OpenMP totals of a region including its sub-regions, for one rank.
@@ -260,7 +264,7 @@ void stop( const char* name )
    if( r.stack.size() <= 1 )
    {
       if( !r.warned )
-         std::cerr << "sw4timer: stop(\"" << name << "\") without a running region" << std::endl;
+         std::cerr << "sw4timer: stop(\"" << name << "\") without a running region" << '\n';
       r.warned = true;
       return;
    }
@@ -268,7 +272,7 @@ void stop( const char* name )
    if( !same_name( r.nodes[n].name, name ) && !r.warned )
    {
       std::cerr << "sw4timer: stop(\"" << name << "\") while \"" << r.nodes[n].name
-                << "\" is running; regions are not properly nested" << std::endl;
+                << "\" is running; regions are not properly nested" << '\n';
       r.warned = true;
    }
    r.nodes[n].total += now - r.nodes[n].tstart;
@@ -288,6 +292,11 @@ void add_mpi( int fn, double seconds, double bytes, int messages )
 void reset()
 {
    reg().clear();
+}
+
+void mark_failed() noexcept
+{
+   g_failed = true;
 }
 
 void omp_set_active()
@@ -506,7 +515,7 @@ void report( MPI_Comm comm, std::ostream& os )
       return;
 
    const double wavg = wsum / nprocs;
-   auto ranks_of = [&]( int row ) { return static_cast<int>( vsum[row * NF + F_PRESENT] + 0.5 ); };
+   auto ranks_of = [&]( int row ) { return static_cast<int>( std::lround( vsum[row * NF + F_PRESENT] ) ); };
    auto avg_of = [&]( int row, int f ) {
       const int k = ranks_of( row );
       return k > 0 ? vsum[row * NF + f] / k : 0.0;
@@ -527,6 +536,8 @@ void report( MPI_Comm comm, std::ostream& os )
    }
 
    std::ostringstream o;
+   if( g_failed )
+      o << "\nsw4timer: WARNING, timer bookkeeping failed during the run; the tables may be incomplete.\n";
    const int line = static_cast<int>( width ) + 74;
    o << "\n" << std::string( line, '-' ) << "\n"
      << "  SW4 region timers: wall time in seconds over " << nprocs << " rank"
@@ -543,7 +554,7 @@ void report( MPI_Comm comm, std::ostream& os )
    {
       const double avg = avg_of( i, F_TIME );
       o << std::left << std::setw( width ) << labels[i] << std::right
-        << std::setw( 10 ) << static_cast<long>( max_of( i, F_CALLS ) + 0.5 )
+        << std::setw( 10 ) << std::lround( max_of( i, F_CALLS ) )
         << std::setw( 7 ) << ranks_of( i )
         << std::fixed << std::setprecision( 4 )
         << std::setw( 12 ) << min_of( i, F_TIME ) << std::setw( 12 ) << avg
@@ -706,8 +717,8 @@ void report( MPI_Comm comm, std::ostream& os )
          f << std::setprecision( 9 );
          auto csv_row = [&]( const std::string& name, int d, int row )
          {
-            f << name << "," << d << "," << static_cast<long>( max_of( row, F_CALLS ) + 0.5 ) << ","
-              << static_cast<long>( vsum[row * NF + F_CALLS] + 0.5 ) << "," << ranks_of( row ) << ","
+            f << name << "," << d << "," << std::lround( max_of( row, F_CALLS ) ) << ","
+              << std::lround( vsum[row * NF + F_CALLS] ) << "," << ranks_of( row ) << ","
               << min_of( row, F_TIME ) << "," << avg_of( row, F_TIME ) << "," << max_of( row, F_TIME ) << ","
               << wavg << "," << min_of( row, F_MPI_T ) << "," << avg_of( row, F_MPI_T ) << ","
               << max_of( row, F_MPI_T ) << "," << avg_of( row, F_MPI_BYTES ) << ","
@@ -725,7 +736,7 @@ void report( MPI_Comm comm, std::ostream& os )
                csv_row( mpi_fn_names[fn], -1, np + 1 + fn );
       }
       else
-         std::cerr << "sw4timer: cannot open SW4_TIMERS_CSV=" << csv << std::endl;
+         std::cerr << "sw4timer: cannot open SW4_TIMERS_CSV=" << csv << '\n';
    }
 }
 } // namespace sw4timer

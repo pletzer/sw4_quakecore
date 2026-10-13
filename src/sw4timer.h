@@ -44,6 +44,7 @@
 #define SW4_TIMER_H
 
 #include <mpi.h>
+#include <cstdint>
 #include <iosfwd>
 #include <vector>
 
@@ -53,9 +54,11 @@ namespace sw4timer
    void stop( const char* name );
    void report( MPI_Comm comm, std::ostream& os );
    void reset();
+   // Record that timer bookkeeping failed (e.g. out of memory); the report warns.
+   void mark_failed() noexcept;
 
    // Called by the PMPI wrappers in sw4mpiprof.C.
-   enum MpiFn { MPIFN_SENDRECV, MPIFN_SEND, MPIFN_RECV, MPIFN_ISEND, MPIFN_IRECV,
+   enum MpiFn : std::uint8_t { MPIFN_SENDRECV, MPIFN_SEND, MPIFN_RECV, MPIFN_ISEND, MPIFN_IRECV,
                 MPIFN_WAIT, MPIFN_WAITALL, MPIFN_BARRIER, MPIFN_BCAST, MPIFN_REDUCE,
                 MPIFN_ALLREDUCE, MPIFN_GATHER, MPIFN_GATHERV, MPIFN_ALLGATHER,
                 MPIFN_ALLGATHERV, MPIFN_COUNT };
@@ -78,7 +81,17 @@ namespace sw4timer
    {
    public:
       explicit Scope( const char* name ) : m_name(name) { start(name); }
-      ~Scope() { stop(m_name); }
+      ~Scope()
+      {
+         try
+         {
+            stop( m_name );
+         }
+         catch( ... )
+         {
+            mark_failed(); // a destructor must not throw
+         }
+      }
       Scope( const Scope& ) = delete;
       Scope& operator=( const Scope& ) = delete;
    private:
