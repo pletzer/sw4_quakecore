@@ -221,6 +221,10 @@ void EW::consintp( Sarray& Uf, Sarray& Unextf, Sarray& Bf, Sarray& Muf, Sarray& 
 //
 // for i=2*ic-1 and j=2*jc-1: Enforce continuity of displacements and normal stresses along the interface
 
+// One parallel region for all four kernels; their work-shared loops keep the
+// barriers that order them. Fork/join once per iteration instead of 8 times.
+#pragma omp parallel
+      {
 //FTNC      if (m_croutines)// tmp
 // optimized version for updating odd i and odd j
 	oddIoddJinterpJacobiOptD(rmax, ufd.data(), ufnewd.data(), ucd.data(), ucnewd.data(),
@@ -295,6 +299,7 @@ void EW::consintp( Sarray& Uf, Sarray& Unextf, Sarray& Bf, Sarray& Muf, Sarray& 
 			       m_iStartInt.data(), m_iEndInt.data(), m_jStartInt.data(), m_jEndInt.data(),
 			       gf, gc, nkf, mDt, hf, hc, cof, relax,
 			       m_sbop, m_ghcof);
+      } // end omp parallel
 //FTNC      else
 //FTNC	evenIevenJinterpJacobi(rmax, Uf, UfNew, Uc, 
 //FTNC			       m_Morc[gc], m_Mlrc[gc],

@@ -785,9 +785,12 @@ void oddIoddJinterpJacobiOptD(double rmax[3], double* __restrict__ a_uf, double*
 // residuals
   double rmax1=0, rmax2=0, rmax3=0;
 
-#pragma omp parallel for reduction(max:rmax1,rmax2,rmax3)
+// Orphaned work-sharing: consintp runs all four kernels in one parallel
+// region. rmax1..3 are local, hence private, and combined below. No omp simd
+// here: updating rmax in a simd loop needs a reduction clause, which the
+// original code lacked (undefined behaviour that miscomputed the residual).
+#pragma omp for
   for( int jc= jcb ; jc <= jce ; jc++ )
-#pragma omp simd
     for( int ic= icb ; ic <= ice ; ic++ )
     {
       double a11, a12, a21, a22, b1, b2, r1, r2, r3, deti;
@@ -908,11 +911,10 @@ void oddIoddJinterpJacobiOptD(double rmax[3], double* __restrict__ a_uf, double*
     } // end for ic, jc
 
 // update Uf and Uc
-#pragma omp parallel
-  for( int c=1 ; c <= 3 ; c++ ) 
+// One work-shared loop over all components: one barrier instead of three.
 #pragma omp for
-    for( int jc= jcb ; jc <= jce ; jc++ )
-#pragma omp simd
+  for( int jc= jcb ; jc <= jce ; jc++ )
+    for( int c=1 ; c <= 3 ; c++ )
       for( int ic= icb ; ic <= ice ; ic++ )
       {
 // i odd, j odd
@@ -920,9 +922,12 @@ void oddIoddJinterpJacobiOptD(double rmax[3], double* __restrict__ a_uf, double*
 	Uf(c,i,j,nkf+1) = UfNew(c,i,j,nkf+1);
 	Uc(c,ic,jc,0) = UcNew(c,ic,jc,0);
       }
-  rmax[0] = rmax1 > rmax[0] ? rmax1:rmax[0];
-  rmax[1] = rmax2 > rmax[1] ? rmax2:rmax[1];
-  rmax[2] = rmax3 > rmax[2] ? rmax3:rmax[2];
+#pragma omp critical(sw4_consintp_rmax)
+  {
+    rmax[0] = rmax1 > rmax[0] ? rmax1:rmax[0];
+    rmax[1] = rmax2 > rmax[1] ? rmax2:rmax[1];
+    rmax[2] = rmax3 > rmax[2] ? rmax3:rmax[2];
+  }
 #undef Unextf
 #undef Mufs
 #undef Mlfs
