@@ -372,6 +372,15 @@ void curvilinear4sg_ci(
     float_sw4 *__restrict__ a_ghcof, float_sw4 *__restrict__ a_acof_no_gp,
     float_sw4 *__restrict__ a_ghcof_no_gp, float_sw4 *__restrict__ a_strx,
     float_sw4 *__restrict__ a_stry, int nk, char op);
+void curvilinear4sg_ci_sub_fields(
+    int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
+    int nfield, float_sw4 *const *a_us, float_sw4 *const *a_mus,
+    float_sw4 *const *a_las, float_sw4 *__restrict__ a_met,
+    float_sw4 *__restrict__ a_jac, float_sw4 *__restrict__ a_lu, int *onesided,
+    float_sw4 *__restrict__ a_acof, float_sw4 *__restrict__ a_bope,
+    float_sw4 *__restrict__ a_ghcof, float_sw4 *__restrict__ a_acof_no_gp,
+    float_sw4 *__restrict__ a_ghcof_no_gp, float_sw4 *__restrict__ a_strx,
+    float_sw4 *__restrict__ a_stry, int nk);
 void energy4_ci(int ifirst, int ilast, int jfirst, int jlast, int kfirst,
                 int klast, int i1, int i2, int j1, int j2, int k1, int k2,
                 int *onesided, float_sw4 *__restrict__ a_um,
@@ -5510,34 +5519,39 @@ void EW::evalRHS(vector<Sarray> &a_U, vector<Sarray> &a_Mu,
     // la_ptr, met_ptr, jac_ptr, FTNC			uacc_ptr, onesided_ptr,
     // m_acof, m_bope, m_ghcof, &op ); FTNC     }
     if (m_use_attenuation && m_number_mechanisms > 0) {
-      op = '-'; // Subtract Uacc := Uacc - L_a(alpha)
+      // Uacc := Uacc - sum_a L_a(alpha_a), all mechanisms in one sweep over
+      // the grid. Bit-identical to one '-' call per mechanism in order a=0,1,..
+      // SW4_FUSED_ATTENUATION=0 selects the per-mechanism calls (for timing).
+      static const bool fused = [] {
+        const char *e = getenv("SW4_FUSED_ATTENUATION");
+        return e == nullptr || strcmp(e, "0") != 0;
+      }();
       SW4_TIMER_START("attenuation");
-      for (int a = 0; a < m_number_mechanisms; a++) {
-        SW4_TIMER_START(mechanism_region(a));
-        float_sw4 *alpha_ptr = a_AlphaVE[g][a].c_ptr();
-        float_sw4 *mua_ptr = mMuVE[g][a].c_ptr();
-        float_sw4 *lambdaa_ptr = mLambdaVE[g][a].c_ptr();
-        // FTNC	  if( m_croutines )
-        {
+      if (fused) {
+        std::vector<float_sw4 *> alphas(m_number_mechanisms),
+            muas(m_number_mechanisms), lambdaas(m_number_mechanisms);
+        for (int a = 0; a < m_number_mechanisms; a++) {
+          alphas[a] = a_AlphaVE[g][a].c_ptr();
+          muas[a] = mMuVE[g][a].c_ptr();
+          lambdaas[a] = mLambdaVE[g][a].c_ptr();
+        }
+        curvilinear4sg_ci_sub_fields(
+            ifirst, ilast, jfirst, jlast, kfirst, klast, m_number_mechanisms,
+            alphas.data(), muas.data(), lambdaas.data(), met_ptr, jac_ptr,
+            uacc_ptr, onesided_ptr, m_acof_no_gp, m_bope, m_ghcof_no_gp,
+            m_acof_no_gp, m_ghcof_no_gp, m_sg_str_x[g], m_sg_str_y[g], nkg);
+      } else {
+        op = '-'; // Subtract Uacc := Uacc - L_a(alpha)
+        for (int a = 0; a < m_number_mechanisms; a++) {
+          SW4_TIMER_START(mechanism_region(a));
           curvilinear4sg_ci(ifirst, ilast, jfirst, jlast, kfirst, klast,
-                            alpha_ptr, mua_ptr, lambdaa_ptr, met_ptr, jac_ptr,
+                            a_AlphaVE[g][a].c_ptr(), mMuVE[g][a].c_ptr(),
+                            mLambdaVE[g][a].c_ptr(), met_ptr, jac_ptr,
                             uacc_ptr, onesided_ptr, m_acof_no_gp, m_bope,
                             m_ghcof_no_gp, m_acof_no_gp, m_ghcof_no_gp,
                             m_sg_str_x[g], m_sg_str_y[g], nkg, op);
+          SW4_TIMER_STOP(mechanism_region(a));
         }
-        SW4_TIMER_STOP(mechanism_region(a));
-        // FTNC	  else
-        // FTNC	  {
-        // FTNC	     if(  usingSupergrid() )
-        // FTNC		curvilinear4sg(&ifirst, &ilast, &jfirst, &jlast,
-        // &kfirst, &klast, FTNC			       alpha_ptr,
-        // mua_ptr, lambdaa_ptr, met_ptr, jac_ptr, FTNC
-        // uacc_ptr, onesided_ptr, m_acof_no_gp, m_bope, m_ghcof_no_gp, FTNC
-        // m_sg_str_x[g], m_sg_str_y[g], &op ); FTNC	     else FTNC
-        // curvilinear4(&ifirst, &ilast, &jfirst, &jlast, &kfirst, &klast, FTNC
-        // alpha_ptr, mua_ptr, lambdaa_ptr, met_ptr, jac_ptr, FTNC
-        // uacc_ptr, onesided_ptr, m_acof_no_gp, m_bope, m_ghcof_no_gp, &op );
-        // FTNC	  }
       }
       SW4_TIMER_STOP("attenuation");
     }

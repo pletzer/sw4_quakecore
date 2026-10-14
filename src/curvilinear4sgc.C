@@ -92,9 +92,9 @@ static inline int sw4_jblock( int jbeg, int jend )
 //
 // Bit-exact: with OP=='=' sgn is 1 and multiplying by exactly 1.0 is exact;
 // with OP=='-' sgn is -1 and `a + (-1)*b` is exactly `a - b` in IEEE-754.
-template<char OP>
+template<char OP, int M>
 static void curvilinear4sg_ci_impl( int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
-			float_sw4* __restrict__ a_u, float_sw4* __restrict__ a_mu, float_sw4* __restrict__ a_lambda,
+			float_sw4* const* a_us, float_sw4* const* a_mus, float_sw4* const* a_las,
 			float_sw4* __restrict__ a_met, float_sw4* __restrict__ a_jac, float_sw4* __restrict__ a_lu,
 			int* onesided, float_sw4* __restrict__ a_acof, float_sw4* __restrict__ a_bope,
 			float_sw4* __restrict__ a_ghcof, float_sw4* __restrict__ a_acof_no_gp, 
@@ -133,7 +133,10 @@ static void curvilinear4sg_ci_impl( int ifirst, int ilast, int jfirst, int jlast
          a_lu[i]=0;
    }
 
-// Assign when OP=='=', accumulate otherwise. See the note above the function.
+// Assign when OP=='=', accumulate otherwise. With M > 1 fields, the m-loop
+// sits between the j-loop and the vectorized i-loop: each row is updated for
+// field 0, 1, .. in turn while its stencil neighbourhood is still in cache, and
+// each point receives the M updates in field order, exactly as M calls would.
 #define SW4_CURV_LU_STORE(c,val)                                        \
    do {                                                                 \
       if constexpr( OP == '=' )      lu(c,i,j,k) = (val);                \
@@ -157,10 +160,10 @@ static void curvilinear4sg_ci_impl( int ifirst, int ilast, int jfirst, int jlast
 
  // Direct reuse of fortran code by these macro definitions:
  // Direct reuse of fortran code by these macro definitions:
-#define mu(i,j,k)     a_mu[base+(i)+ni*(j)+nij*(k)]
-#define la(i,j,k) a_lambda[base+(i)+ni*(j)+nij*(k)]
+#define mu(i,j,k)   a_mu_m[base+(i)+ni*(j)+nij*(k)]
+#define la(i,j,k)   a_la_m[base+(i)+ni*(j)+nij*(k)]
 #define jac(i,j,k)   a_jac[base+(i)+ni*(j)+nij*(k)]
-#define u(c,i,j,k)     a_u[base3+(i)+ni*(j)+nij*(k)+nijk*(c)]   
+#define u(c,i,j,k)   a_u_m[base3+(i)+ni*(j)+nij*(k)+nijk*(c)]   
 #define lu(c,i,j,k)   a_lu[base3+(i)+ni*(j)+nij*(k)+nijk*(c)]   
 #define met(c,i,j,k) a_met[base4+(i)+ni*(j)+nij*(k)+nijk*(c)]   
 #define strx(i) a_strx[i-ifirst0]
@@ -206,6 +209,11 @@ static void curvilinear4sg_ci_impl( int ifirst, int ilast, int jfirst, int jlast
 #pragma omp for collapse(2) schedule(static,jblk) nowait
       for( int k= 1; k <= 6 ; k++ )
 	 for( int j=jfirst+2; j <= jlast-2 ; j++ )
+	    for( int m=0 ; m < M ; m++ )
+	    {
+	    const float_sw4* __restrict__ a_u_m  = a_us[m];
+	    const float_sw4* __restrict__ a_mu_m = a_mus[m];
+	    const float_sw4* __restrict__ a_la_m = a_las[m];
 #pragma omp simd
 	    for( int i=ifirst+2; i <= ilast-2 ; i++ )
 	    {
@@ -700,6 +708,7 @@ static void curvilinear4sg_ci_impl( int ifirst, int ilast, int jfirst, int jlast
 	       SW4_CURV_LU_STORE(2, r2*ijac);
 	       SW4_CURV_LU_STORE(3, r3*ijac);
 	    }
+	    } // end for m
    }
 // schedule(static,jblk) on every collapsed (k,j) loop in the RHS kernels, and
 // no nowait between the three fissioned interior loops below. Both are about
@@ -765,6 +774,11 @@ static void curvilinear4sg_ci_impl( int ifirst, int ilast, int jfirst, int jlast
 #pragma omp for collapse(2) schedule(static,jblk)
    for( int k= kstart; k <= kend ; k++ )
       for( int j=jfirst+2; j <= jlast-2 ; j++ )
+	 for( int m=0 ; m < M ; m++ )
+	 {
+	 const float_sw4* __restrict__ a_u_m  = a_us[m];
+	 const float_sw4* __restrict__ a_mu_m = a_mus[m];
+	 const float_sw4* __restrict__ a_la_m = a_las[m];
 #pragma omp simd
 	 for( int i=ifirst+2; i <= ilast-2 ; i++ )
 	 {
@@ -1057,10 +1071,16 @@ static void curvilinear4sg_ci_impl( int ifirst, int ilast, int jfirst, int jlast
 // 4 ops, tot=773
 	    SW4_CURV_LU_STORE(1, r1*ijac);
 	 }
+	 } // end for m
 
 #pragma omp for collapse(2) schedule(static,jblk)
    for( int k= kstart; k <= kend ; k++ )
       for( int j=jfirst+2; j <= jlast-2 ; j++ )
+	 for( int m=0 ; m < M ; m++ )
+	 {
+	 const float_sw4* __restrict__ a_u_m  = a_us[m];
+	 const float_sw4* __restrict__ a_mu_m = a_mus[m];
+	 const float_sw4* __restrict__ a_la_m = a_las[m];
 #pragma omp simd
 	 for( int i=ifirst+2; i <= ilast-2 ; i++ )
 	 {
@@ -1362,10 +1382,16 @@ static void curvilinear4sg_ci_impl( int ifirst, int ilast, int jfirst, int jlast
 // 4 ops, tot=1541
 	    SW4_CURV_LU_STORE(2, r2*ijac);
 	 }
+	 } // end for m
 
 #pragma omp for collapse(2) schedule(static,jblk)
    for( int k= kstart; k <= kend ; k++ )
       for( int j=jfirst+2; j <= jlast-2 ; j++ )
+	 for( int m=0 ; m < M ; m++ )
+	 {
+	 const float_sw4* __restrict__ a_u_m  = a_us[m];
+	 const float_sw4* __restrict__ a_mu_m = a_mus[m];
+	 const float_sw4* __restrict__ a_la_m = a_las[m];
 #pragma omp simd
 	 for( int i=ifirst+2; i <= ilast-2 ; i++ )
 	 {
@@ -1601,11 +1627,17 @@ static void curvilinear4sg_ci_impl( int ifirst, int ilast, int jfirst, int jlast
 // 4 ops, tot=2126
 	    SW4_CURV_LU_STORE(3, r3*ijac);
 	 }
+	 } // end for m
    if( onesided[5]==1 )
    {
 #pragma omp for collapse(2) schedule(static,jblk) nowait
       for( int k= nk-5; k <= nk ; k++ )
 	 for( int j=jfirst+2; j <= jlast-2 ; j++ )
+	    for( int m=0 ; m < M ; m++ )
+	    {
+	    const float_sw4* __restrict__ a_u_m  = a_us[m];
+	    const float_sw4* __restrict__ a_mu_m = a_mus[m];
+	    const float_sw4* __restrict__ a_la_m = a_las[m];
 #pragma omp simd
 	    for( int i=ifirst+2; i <= ilast-2 ; i++ )
 	    {
@@ -2100,6 +2132,7 @@ static void curvilinear4sg_ci_impl( int ifirst, int ilast, int jfirst, int jlast
 	       SW4_CURV_LU_STORE(2, r2*ijac);
 	       SW4_CURV_LU_STORE(3, r3*ijac);
 	    }
+	    } // end for m
    }
    }
 #undef mu
@@ -2125,15 +2158,50 @@ void curvilinear4sg_ci( int ifirst, int ilast, int jfirst, int jlast, int kfirst
 			float_sw4* __restrict__ a_u, float_sw4* __restrict__ a_mu, float_sw4* __restrict__ a_lambda,
 			float_sw4* __restrict__ a_met, float_sw4* __restrict__ a_jac, float_sw4* __restrict__ a_lu,
 			int* onesided, float_sw4* __restrict__ a_acof, float_sw4* __restrict__ a_bope,
-			float_sw4* __restrict__ a_ghcof, float_sw4* __restrict__ a_acof_no_gp, 
+			float_sw4* __restrict__ a_ghcof, float_sw4* __restrict__ a_acof_no_gp,
                         float_sw4* __restrict__ a_ghcof_no_gp,
                         float_sw4* __restrict__ a_strx, float_sw4* __restrict__ a_stry,
 			int nk, char op )
 {
+   float_sw4* const us[1] = {a_u};
+   float_sw4* const mus[1] = {a_mu};
+   float_sw4* const las[1] = {a_lambda};
    if( op == '=' )
-      curvilinear4sg_ci_impl<'='>( ifirst, ilast, jfirst, jlast, kfirst, klast, a_u, a_mu, a_lambda, a_met, a_jac, a_lu, onesided, a_acof, a_bope, a_ghcof, a_acof_no_gp, a_ghcof_no_gp, a_strx, a_stry, nk );
+      curvilinear4sg_ci_impl<'=',1>( ifirst, ilast, jfirst, jlast, kfirst, klast, us, mus, las, a_met, a_jac, a_lu, onesided, a_acof, a_bope, a_ghcof, a_acof_no_gp, a_ghcof_no_gp, a_strx, a_stry, nk );
    else if( op == '+' )
-      curvilinear4sg_ci_impl<'+'>( ifirst, ilast, jfirst, jlast, kfirst, klast, a_u, a_mu, a_lambda, a_met, a_jac, a_lu, onesided, a_acof, a_bope, a_ghcof, a_acof_no_gp, a_ghcof_no_gp, a_strx, a_stry, nk );
+      curvilinear4sg_ci_impl<'+',1>( ifirst, ilast, jfirst, jlast, kfirst, klast, us, mus, las, a_met, a_jac, a_lu, onesided, a_acof, a_bope, a_ghcof, a_acof_no_gp, a_ghcof_no_gp, a_strx, a_stry, nk );
    else if( op == '-' )
-      curvilinear4sg_ci_impl<'-'>( ifirst, ilast, jfirst, jlast, kfirst, klast, a_u, a_mu, a_lambda, a_met, a_jac, a_lu, onesided, a_acof, a_bope, a_ghcof, a_acof_no_gp, a_ghcof_no_gp, a_strx, a_stry, nk );
+      curvilinear4sg_ci_impl<'-',1>( ifirst, ilast, jfirst, jlast, kfirst, klast, us, mus, las, a_met, a_jac, a_lu, onesided, a_acof, a_bope, a_ghcof, a_acof_no_gp, a_ghcof_no_gp, a_strx, a_stry, nk );
+}
+
+//-----------------------------------------------------------------------
+// lu -= sum over the nfield fields of L(mu[m], la[m]; u[m]), in one sweep over
+// the grid instead of nfield. Used for the attenuation memory variables, one
+// field per mechanism. Bit-identical to nfield calls with op='-' in field
+// order: each point receives the same updates in the same order. More than
+// SW4_CURV_MAX_FUSED fields are done in batches.
+void curvilinear4sg_ci_sub_fields( int ifirst, int ilast, int jfirst, int jlast, int kfirst, int klast,
+			int nfield, float_sw4* const* a_us, float_sw4* const* a_mus, float_sw4* const* a_las,
+			float_sw4* __restrict__ a_met, float_sw4* __restrict__ a_jac, float_sw4* __restrict__ a_lu,
+			int* onesided, float_sw4* __restrict__ a_acof, float_sw4* __restrict__ a_bope,
+			float_sw4* __restrict__ a_ghcof, float_sw4* __restrict__ a_acof_no_gp,
+                        float_sw4* __restrict__ a_ghcof_no_gp,
+                        float_sw4* __restrict__ a_strx, float_sw4* __restrict__ a_stry,
+			int nk )
+{
+   constexpr int SW4_CURV_MAX_FUSED = 4;
+   for( int f0 = 0 ; f0 < nfield ; f0 += SW4_CURV_MAX_FUSED )
+   {
+      const int n = nfield - f0 < SW4_CURV_MAX_FUSED ? nfield - f0 : SW4_CURV_MAX_FUSED;
+      float_sw4* const* us = a_us + f0;
+      float_sw4* const* mus = a_mus + f0;
+      float_sw4* const* las = a_las + f0;
+      switch( n )
+      {
+      case 1: curvilinear4sg_ci_impl<'-',1>( ifirst, ilast, jfirst, jlast, kfirst, klast, us, mus, las, a_met, a_jac, a_lu, onesided, a_acof, a_bope, a_ghcof, a_acof_no_gp, a_ghcof_no_gp, a_strx, a_stry, nk ); break;
+      case 2: curvilinear4sg_ci_impl<'-',2>( ifirst, ilast, jfirst, jlast, kfirst, klast, us, mus, las, a_met, a_jac, a_lu, onesided, a_acof, a_bope, a_ghcof, a_acof_no_gp, a_ghcof_no_gp, a_strx, a_stry, nk ); break;
+      case 3: curvilinear4sg_ci_impl<'-',3>( ifirst, ilast, jfirst, jlast, kfirst, klast, us, mus, las, a_met, a_jac, a_lu, onesided, a_acof, a_bope, a_ghcof, a_acof_no_gp, a_ghcof_no_gp, a_strx, a_stry, nk ); break;
+      default: curvilinear4sg_ci_impl<'-',4>( ifirst, ilast, jfirst, jlast, kfirst, klast, us, mus, las, a_met, a_jac, a_lu, onesided, a_acof, a_bope, a_ghcof, a_acof_no_gp, a_ghcof_no_gp, a_strx, a_stry, nk ); break;
+      }
+   }
 }
