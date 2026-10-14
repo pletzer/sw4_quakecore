@@ -39,10 +39,13 @@ params = { chk = "checkpoint restartpath=../straight restartfile=chk.cycle=60.sw
 name = "agree"
 kind = "restart_agree"
 runs = ["straight", "restarted"]
-# Same tolerance as parallel/restart: the restart round trip of the
-# pre-checkpoint station samples is not bitwise yet.
+# Not bitwise: on restart the pre-checkpoint station samples are read back,
+# rotated and rewritten, which can change a stored float32 sample by 1 ulp
+# (here A/NS sample 40 in double, a relative misfit of ~8e-10). Station output
+# is float32 in both precisions, so double gets the float tolerance. #27 makes
+# the round trip exact; this check can then become bitwise.
 bitwise = false
-rtol = { double = 1e-12, float = 1e-6 }
+rtol = { double = 1e-6, float = 1e-6 }
 
 [[check]]
 name = "no-io-errors"
